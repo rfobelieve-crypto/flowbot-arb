@@ -42,13 +42,25 @@ HEADER = ["minute_ts", "time_utc",
           "premium_open_bps", "premium_high_bps", "premium_low_bps",
           "premium_close_bps", "premium_mean_bps", "premium_std_bps",
           "sell_edge_mean_bps", "sell_edge_max_bps",
-          "buy_edge_mean_bps", "buy_edge_max_bps", "samples"]
+          "buy_edge_mean_bps", "buy_edge_max_bps", "samples",
+          # 2026-08-28 local patch: a fat edge print is only honest if we
+          # know (a) how much money actually sat at top-of-book at that
+          # moment and (b) whether either book's PRICE was stale.
+          # *_max_notional_usd = min of both legs' top-level notional at the
+          # sample that set the minute's max edge; *_max_age_s = the older
+          # book's price-data age at that same sample (last_update_ts, not
+          # alive_ts — a ping keeps a dead price looking alive).
+          "e_bid_sz", "e_ask_sz", "h_bid_sz", "h_ask_sz",
+          "sell_max_notional_usd", "sell_max_age_s",
+          "buy_max_notional_usd", "buy_max_age_s"]
 
 
 class _MinuteAgg:
     __slots__ = ("minute", "n", "p_open", "p_high", "p_low", "p_close",
                  "p_sum", "p_sumsq", "s_sum", "s_max", "b_sum", "b_max",
-                 "e_bid", "e_ask", "h_bid", "h_ask")
+                 "e_bid", "e_ask", "h_bid", "h_ask",
+                 "e_bid_sz", "e_ask_sz", "h_bid_sz", "h_ask_sz",
+                 "s_max_ntl", "s_max_age", "b_max_ntl", "b_max_age")
 
     def __init__(self, minute: int) -> None:
         self.minute = minute
@@ -60,8 +72,14 @@ class _MinuteAgg:
         self.b_sum = 0.0
         self.b_max = -math.inf
         self.e_bid = self.e_ask = self.h_bid = self.h_ask = 0.0
+        self.e_bid_sz = self.e_ask_sz = self.h_bid_sz = self.h_ask_sz = 0.0
+        self.s_max_ntl = self.s_max_age = 0.0
+        self.b_max_ntl = self.b_max_age = 0.0
 
-    def add(self, e_bid: float, e_ask: float, h_bid: float, h_ask: float) -> None:
+    def add(self, e_bid: float, e_ask: float, h_bid: float, h_ask: float,
+            e_bid_sz: float = 0.0, e_ask_sz: float = 0.0,
+            h_bid_sz: float = 0.0, h_ask_sz: float = 0.0,
+            e_age: float = 0.0, h_age: float = 0.0) -> None:
         e_mid = (e_bid + e_ask) / 2.0
         h_mid = (h_bid + h_ask) / 2.0
         prem = (e_mid / h_mid - 1.0) * 1e4
@@ -76,10 +94,20 @@ class _MinuteAgg:
         self.p_sum += prem
         self.p_sumsq += prem * prem
         self.s_sum += sell_edge
-        self.s_max = max(self.s_max, sell_edge)
+        if sell_edge > self.s_max:
+            self.s_max = sell_edge
+            # sell entropy at its bid / buy hedge at its ask
+            self.s_max_ntl = min(e_bid_sz * e_bid, h_ask_sz * h_ask)
+            self.s_max_age = max(e_age, h_age)
         self.b_sum += buy_edge
-        self.b_max = max(self.b_max, buy_edge)
+        if buy_edge > self.b_max:
+            self.b_max = buy_edge
+            # buy entropy at its ask / sell hedge at its bid
+            self.b_max_ntl = min(e_ask_sz * e_ask, h_bid_sz * h_bid)
+            self.b_max_age = max(e_age, h_age)
         self.e_bid, self.e_ask, self.h_bid, self.h_ask = e_bid, e_ask, h_bid, h_ask
+        self.e_bid_sz, self.e_ask_sz = e_bid_sz, e_ask_sz
+        self.h_bid_sz, self.h_ask_sz = h_bid_sz, h_ask_sz
 
     def row(self) -> list:
         mean = self.p_sum / self.n
@@ -95,7 +123,11 @@ class _MinuteAgg:
                 f"{mean:.3f}", f"{math.sqrt(var):.3f}",
                 f"{self.s_sum / self.n:.3f}", f"{self.s_max:.3f}",
                 f"{self.b_sum / self.n:.3f}", f"{self.b_max:.3f}",
-                self.n]
+                self.n,
+                f"{self.e_bid_sz:.6g}", f"{self.e_ask_sz:.6g}",
+                f"{self.h_bid_sz:.6g}", f"{self.h_ask_sz:.6g}",
+                f"{self.s_max_ntl:.2f}", f"{self.s_max_age:.1f}",
+                f"{self.b_max_ntl:.2f}", f"{self.b_max_age:.1f}"]
 
 
 class MinuteRecorder:
@@ -156,7 +188,12 @@ class MinuteRecorder:
             return
         if self._agg is None:
             self._agg = _MinuteAgg(minute)
-        self._agg.add(e_bid, e_ask, h_bid, h_ask)
+        eb, hb = self.entropy_book, self.hedge_book
+        self._agg.add(
+            e_bid, e_ask, h_bid, h_ask,
+            eb.bids.get(e_bid, 0.0), eb.asks.get(e_ask, 0.0),
+            hb.bids.get(h_bid, 0.0), hb.asks.get(h_ask, 0.0),
+            max(0.0, now - eb.last_update_ts), max(0.0, now - hb.last_update_ts))
 
     def close(self) -> None:
         """Flush the partial minute and close the file (call on shutdown)."""
