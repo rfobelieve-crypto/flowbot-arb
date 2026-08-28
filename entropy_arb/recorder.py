@@ -117,13 +117,13 @@ class MinuteRecorder:
             os.makedirs(d, exist_ok=True)
         if os.path.exists(self.path) and os.path.getsize(self.path) > 0:
             # never append rows under a different schema's header
-            with open(self.path) as fh0:
+            with open(self.path, encoding="utf-8") as fh0:
                 if fh0.readline().strip() != ",".join(HEADER):
                     log.warning("%s has an old header — rotated to %s.old",
                                 self.path, self.path)
                     os.replace(self.path, self.path + ".old")
         new = not os.path.exists(self.path) or os.path.getsize(self.path) == 0
-        self._fh = open(self.path, "a", newline="")
+        self._fh = open(self.path, "a", newline="", encoding="utf-8")
         self._writer = csv.writer(self._fh)
         if new:
             self._writer.writerow(HEADER)

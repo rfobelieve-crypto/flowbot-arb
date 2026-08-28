@@ -757,11 +757,11 @@ class Engine:
             if d:
                 os.makedirs(d, exist_ok=True)
             if os.path.exists(path):
-                with open(path) as fh0:
+                with open(path, encoding="utf-8") as fh0:
                     if fh0.readline().strip() != ",".join(CSV_HEADER):
                         os.replace(path, path + ".old")
             new = not os.path.exists(path)
-            with open(path, "a", newline="") as fh:
+            with open(path, "a", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
                 if new:
                     w.writerow(CSV_HEADER)

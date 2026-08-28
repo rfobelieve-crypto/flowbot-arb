@@ -41,7 +41,7 @@ def pctl(sorted_vals: list, q: float) -> float:
 def load_rows(path: str, hours: float, min_samples: int) -> list:
     cutoff = time.time() - hours * 3600 if hours > 0 else 0.0
     rows = []
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             try:
                 if float(r["minute_ts"]) < cutoff:

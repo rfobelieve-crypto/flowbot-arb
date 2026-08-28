@@ -57,7 +57,12 @@ async def amain(cfg, record_only: bool, use_dashboard: bool, force_tty: bool,
     eng = Engine(cfg, record_only=record_only)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, eng.request_stop)
+        try:
+            loop.add_signal_handler(sig, eng.request_stop)
+        except NotImplementedError:
+            # Windows ProactorEventLoop has no add_signal_handler; fall back
+            # to the classic handler so Ctrl+C still stops cleanly.
+            signal.signal(sig, lambda *_: eng.request_stop())
     if not use_dashboard:
         await eng.run()
         return
