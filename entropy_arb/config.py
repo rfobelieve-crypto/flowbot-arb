@@ -164,6 +164,7 @@ _SCHEMA: Dict[str, Any] = {
         "max_orders_per_min": int,
     },
     "hedge": {
+        "symbol": None,   # optional ticker alias on the hedge venue (local patch 2026-08-30)
         "taker_fee_bps": float,
         "max_position_usd": float,
         "max_orders_per_min": int,
@@ -298,8 +299,10 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
 
     entropy_hl_creds = HLCreds(_env_s("HL_PRIVATE_KEY"),
                                _env_s("HL_ACCOUNT_ADDRESS"))
+    # dex "" = Hyperliquid core mainnet as leg A (crypto pairs; local patch
+    # 2026-08-30 for the §0.75 recording family). Label it honestly.
     entropy = VenueConf(
-        key="entropy", kind="hl", label="ENTROPY",
+        key="entropy", kind="hl", label="ENTROPY" if entropy_dex else "HL",
         symbol=symbol,
         fee_bps=float(_get(raw, "entropy", "taker_fee_bps", 0.0)),
         cap_usd=float(_get(raw, "entropy", "max_position_usd", 1000.0)),
@@ -321,10 +324,13 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
                 _env_s("HL_ACCOUNT_ADDRESS_XYZ") or _env_s("HL_ACCOUNT_ADDRESS")),
         )
     else:
+        # hedge.symbol: optional alias when the hedge venue lists the same
+        # instrument under a different ticker (Entropy io:OAI == Lighter
+        # OPENAI, io:ANTH == ANTHROPIC). Local patch 2026-08-30.
         hedge = VenueConf(
             key="hedge", kind="lighter",
             label="LIGHTER" if hedge_venue == "lighter" else "RH",
-            symbol=symbol,
+            symbol=str(_get(raw, "hedge", "symbol", None) or symbol),
             fee_bps=float(_get(raw, "hedge", "taker_fee_bps", 0.0)),
             cap_usd=float(_get(raw, "hedge", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "hedge", "max_orders_per_min", 30)),

@@ -112,7 +112,10 @@ class HLVenue:
             if a.get("isDelisted"):
                 raise RuntimeError(f"[{self.name}] {a['name']} is delisted")
             self.coin = a["name"]
-            self.asset_id = 110000 + (dex_index - 1) * 10000 + idx
+            # core mainnet (dex "") uses plain universe indices; HIP-3 dexs
+            # use the 110000 + block scheme. Local patch 2026-08-30.
+            self.asset_id = (idx if not self.conf.hl_dex
+                             else 110000 + (dex_index - 1) * 10000 + idx)
             self.size_decimals = int(a["szDecimals"])
             self.min_base = 10 ** -self.size_decimals
             log.info("[%s] %s asset_id=%d szDecimals=%d maxLev=%sx %s",
