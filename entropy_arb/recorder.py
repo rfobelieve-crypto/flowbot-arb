@@ -52,7 +52,15 @@ HEADER = ["minute_ts", "time_utc",
           # alive_ts — a ping keeps a dead price looking alive).
           "e_bid_sz", "e_ask_sz", "h_bid_sz", "h_ask_sz",
           "sell_max_notional_usd", "sell_max_age_s",
-          "buy_max_notional_usd", "buy_max_age_s"]
+          "buy_max_notional_usd", "buy_max_age_s",
+          # 2026-09-01 local patch: the OTHER way this pair can pay. The
+          # price spread needs to CONVERGE to be worth anything; the funding
+          # differential pays for HOLDING. Both normalised to bps per 8h
+          # (HL publishes per hour, Lighter per 8h — see funding.py).
+          # fund_diff = hedge - entropy: positive means long-entropy /
+          # short-hedge collects.
+          "fund_entropy_bps8h", "fund_hedge_bps8h", "fund_diff_bps8h",
+          "fund_age_s"]
 
 
 class _MinuteAgg:
@@ -132,8 +140,11 @@ class _MinuteAgg:
 
 class MinuteRecorder:
     def __init__(self, path: str, entropy_book: OrderBook, hedge_book: OrderBook,
-                 staleness_sec: float, interval_sec: float = 1.0) -> None:
+                 staleness_sec: float, interval_sec: float = 1.0,
+                 funding=None) -> None:
         self.path = path
+        # optional FundingPoller; None -> the three funding columns are blank
+        self.funding = funding
         self.entropy_book = entropy_book
         self.hedge_book = hedge_book
         self.staleness_sec = staleness_sec
@@ -151,9 +162,14 @@ class MinuteRecorder:
             # never append rows under a different schema's header
             with open(self.path, encoding="utf-8") as fh0:
                 if fh0.readline().strip() != ",".join(HEADER):
-                    log.warning("%s has an old header — rotated to %s.old",
-                                self.path, self.path)
-                    os.replace(self.path, self.path + ".old")
+                    # Timestamped so a SECOND schema change cannot overwrite
+                    # the first rotation's file (the 2026-08-28 upgrade left
+                    # 257 minutes in minutes.csv.old; os.replace would have
+                    # eaten them). Readers glob "<path>*.old".
+                    dst = f"{self.path}.{time.strftime('%Y%m%d%H%M')}.old"
+                    log.warning("%s has an old header — rotated to %s",
+                                self.path, dst)
+                    os.replace(self.path, dst)
         new = not os.path.exists(self.path) or os.path.getsize(self.path) == 0
         self._fh = open(self.path, "a", newline="", encoding="utf-8")
         self._writer = csv.writer(self._fh)
@@ -168,7 +184,20 @@ class MinuteRecorder:
             return
         if self._writer is None:
             self._open()
-        self._writer.writerow(self._agg.row())
+        row = self._agg.row()
+        # funding is a slow-moving venue property, not a per-sample quantity:
+        # read it once at flush rather than aggregating it per second.
+        fe = fh = fd = fa = ""
+        if self.funding is not None:
+            try:
+                e, h, diff, age = self.funding.snapshot()
+                fe = "" if e is None else f"{e:.4f}"
+                fh = "" if h is None else f"{h:.4f}"
+                fd = "" if diff is None else f"{diff:.4f}"
+                fa = "" if age is None else f"{age:.0f}"
+            except Exception:
+                pass                      # never lose a minute over funding
+        self._writer.writerow(row + [fe, fh, fd, fa])
         self._fh.flush()
         self.rows_written += 1
         self._agg = None

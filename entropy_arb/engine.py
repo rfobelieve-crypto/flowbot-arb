@@ -190,8 +190,27 @@ class Engine:
         for v in self.venues.values():
             tasks += v.start_tasks(self.stop, self._update_evt.set, live)
         if cfg.recorder_enabled or self.record_only:
+            # Funding poller (local patch 2026-09-01): the price spread must
+            # CONVERGE to pay; the funding differential pays for HOLDING.
+            # Recording both is what lets the verdict tell a stable carry
+            # from a number that flips daily. Never fatal — a poller that
+            # cannot start just leaves the columns blank.
+            funding = None
+            try:
+                from entropy_arb.funding import FundingPoller
+                if self.hedge.kind == "lighter":
+                    funding = FundingPoller(
+                        hl_coin=self.entropy.conf.symbol,
+                        hl_dex=self.entropy.conf.hl_dex,
+                        lighter_venue=cfg.hedge_venue,
+                        lighter_symbol=self.hedge.conf.symbol)
+                    funding.start()
+            except Exception as e:                       # noqa: BLE001
+                log.warning("funding poller unavailable (columns blank): %r", e)
+                funding = None
             self.recorder = MinuteRecorder(cfg.recorder_csv, self.entropy.book,
-                                           self.hedge.book, cfg.staleness_sec)
+                                           self.hedge.book, cfg.staleness_sec,
+                                           funding=funding)
             tasks.append(asyncio.create_task(self.recorder.run(self.stop),
                                              name="recorder"))
         if not self.record_only:
