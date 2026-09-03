@@ -92,6 +92,7 @@ class VenueConf:
     # lighter
     lighter_profile: Optional[LighterProfile] = None
     lighter_creds: Optional[LighterCreds] = None
+    lighter_venue: str = ""   # "lighter" | "lighter-rh" (funding poller key)
 
 
 @dataclass
@@ -159,6 +160,8 @@ _SCHEMA: Dict[str, Any] = {
     },
     "entropy": {
         "dex": str,
+        "venue": str,          # local patch 2026-09-04: hl | lighter | lighter-rh
+        "symbol": str,         # alias on the leg-A venue (same idea as hedge.symbol)
         "taker_fee_bps": float,
         "max_position_usd": float,
         "max_orders_per_min": int,
@@ -311,6 +314,32 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         hl_creds=entropy_hl_creds,
     )
 
+    # Local patch 2026-09-04 (flow_system TODO 1.02): leg A may itself be a
+    # Lighter chain, so a pair whose BOTH legs sit on a structurally zero-fee
+    # schedule (lighter <-> lighter-rh) can be recorded with the same engine.
+    # `entropy.venue: lighter|lighter-rh`; default "hl" keeps every existing
+    # config byte-for-byte the same.
+    entropy_venue = str(_get(raw, "entropy", "venue", "hl") or "hl")
+    if entropy_venue in ("lighter", "lighter-rh"):
+        if entropy_venue == hedge_venue:
+            raise ConfigError("entropy.venue equals --hedge: both legs are the "
+                              "same market / 两条腿是同一个市场")
+        entropy = VenueConf(
+            key="entropy", kind="lighter",
+            label="LIGHTER" if entropy_venue == "lighter" else "RH",
+            symbol=str(_get(raw, "entropy", "symbol", None) or symbol),
+            fee_bps=float(_get(raw, "entropy", "taker_fee_bps", 0.0)),
+            cap_usd=float(_get(raw, "entropy", "max_position_usd", 1000.0)),
+            orders_per_min=int(_get(raw, "entropy", "max_orders_per_min", 30)),
+            lighter_profile=LIGHTER_PROFILES[entropy_venue],
+            lighter_creds=LighterCreds(_env_i("LIGHTER_ACCOUNT_INDEX"),
+                                       _env_i("LIGHTER_API_KEY_INDEX"),
+                                       _env_s("LIGHTER_API_PRIVATE_KEY")),
+            lighter_venue=entropy_venue,
+        )
+    elif entropy_venue != "hl":
+        raise ConfigError(f"entropy.venue must be hl|lighter|lighter-rh, got {entropy_venue!r}")
+
     if hedge_venue == "tradexyz":
         hedge = VenueConf(
             key="hedge", kind="hl", label="XYZ",
@@ -338,6 +367,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             lighter_creds=LighterCreds(_env_i("LIGHTER_ACCOUNT_INDEX"),
                                        _env_i("LIGHTER_API_KEY_INDEX"),
                                        _env_s("LIGHTER_API_PRIVATE_KEY")),
+            lighter_venue=hedge_venue,
         )
 
     return Config(

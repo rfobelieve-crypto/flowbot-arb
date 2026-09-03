@@ -53,11 +53,15 @@ class FundingPoller:
     """
 
     def __init__(self, hl_coin: str, hl_dex: str,
-                 lighter_venue: str, lighter_symbol: str) -> None:
+                 lighter_venue: str, lighter_symbol: str,
+                 entropy_lighter_venue: Optional[str] = None) -> None:
         self.hl_coin = hl_coin.split(":")[-1]     # "io:SNDK" -> "SNDK"
         self.hl_dex = hl_dex or ""
         self.lighter_venue = lighter_venue
         self.lighter_symbol = lighter_symbol
+        # Local patch 2026-09-04: when leg A is a Lighter chain too, its
+        # funding comes from that chain's endpoint, not from HL.
+        self.entropy_lighter_venue = entropy_lighter_venue
         self._lock = threading.Lock()
         self._e: Optional[float] = None           # bps / 8h
         self._h: Optional[float] = None           # bps / 8h
@@ -81,8 +85,11 @@ class FundingPoller:
                 return float(c.get("funding") or 0.0) * 8.0 * 1e4
         return None
 
-    def _fetch_lighter(self) -> Optional[float]:
-        base = LIGHTER_BASE.get(self.lighter_venue)
+    def _fetch_lighter(self, venue: Optional[str] = None,
+                       symbol: Optional[str] = None) -> Optional[float]:
+        venue = venue or self.lighter_venue
+        symbol = symbol or self.lighter_symbol
+        base = LIGHTER_BASE.get(venue)
         if not base:
             return None
         r = requests.get(base + "/api/v1/funding-rates", timeout=TIMEOUT)
@@ -91,7 +98,7 @@ class FundingPoller:
             # only the venue's OWN rate; the endpoint also mirrors
             # binance/bybit/hyperliquid reference rates
             if (row.get("exchange") == "lighter"
-                    and row.get("symbol") == self.lighter_symbol):
+                    and row.get("symbol") == symbol):
                 return float(row.get("rate") or 0.0) * 1e4   # already /8h
         return None
 
@@ -100,9 +107,10 @@ class FundingPoller:
     def _poll_once(self) -> None:
         e = h = None
         try:
-            e = self._fetch_hl()
+            e = (self._fetch_lighter(self.entropy_lighter_venue, self.hl_coin)
+                 if self.entropy_lighter_venue else self._fetch_hl())
         except Exception as exc:
-            log.debug("funding: HL fetch failed: %r", exc)
+            log.debug("funding: leg-A fetch failed: %r", exc)
         try:
             h = self._fetch_lighter()
         except Exception as exc:

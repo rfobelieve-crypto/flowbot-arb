@@ -203,7 +203,10 @@ class Engine:
                         hl_coin=self.entropy.conf.symbol,
                         hl_dex=self.entropy.conf.hl_dex,
                         lighter_venue=cfg.hedge_venue,
-                        lighter_symbol=self.hedge.conf.symbol)
+                        lighter_symbol=self.hedge.conf.symbol,
+                        entropy_lighter_venue=(
+                            self.entropy.conf.lighter_venue
+                            if self.entropy.kind == "lighter" else None))
                     funding.start()
             except Exception as e:                       # noqa: BLE001
                 log.warning("funding poller unavailable (columns blank): %r", e)
