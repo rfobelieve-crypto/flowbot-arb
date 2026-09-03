@@ -223,8 +223,16 @@ def bitget_universe() -> dict:
         if v < MIN_VOL24_USD:
             continue
         base = d.get("baseCoin") or sym[:-4]
+        # mult = 1.0, NOT sizeMultiplier. Bitget's USDT-FUTURES book quotes
+        # size in BASE COIN already (BTCUSDT top bid 1.8754 = 1.8754 BTC =
+        # ~$146k), while `sizeMultiplier` is the minimum size STEP (0.0001 for
+        # BTC, 0.01 for XAUT). Using it as a contract value divided every
+        # Bitget depth by 10,000 and made the CEX legs look like empty books —
+        # the exact opposite of why they were added. OKX is different and does
+        # need its multiplier: its size is in CONTRACTS and ctVal is the coin
+        # per contract (verified 2026-09-03 against both live books).
         out[base] = {"kind": "bitget", "venue": "bitget", "sym": sym,
-                     "mult": float(d.get("sizeMultiplier") or 1.0),
+                     "mult": 1.0,
                      "vol24": v, "created_at": ""}
         fees[base] = {"taker": round(float(d.get("takerFeeRate") or 0) * 1e4, 2),
                       "maker": round(float(d.get("makerFeeRate") or 0) * 1e4, 2)}
@@ -260,6 +268,34 @@ def bitget_top(symbol: str, mult: float):
             _cum(bids, bids[0][0], True, mult), _cum(asks, asks[0][0], False, mult))
 
 
+LAST_GOOD_PATH = os.path.join(OUT_DIR, "last_good_universe.json")
+
+
+def _load_last_good() -> None:
+    """The in-memory fallback below dies with the process, and the process is
+    restarted by a batch loop. 2026-09-03: a restart landed on one of Lighter's
+    JSONDecodeErrors with an empty cache and ran a whole refresh interval
+    without the venue that half the pairs need. Persist it."""
+    try:
+        LAST_GOOD.update(json.load(open(LAST_GOOD_PATH, encoding="utf-8")))
+        log(f"last-good universe cache loaded ({len(LAST_GOOD)} venues)")
+    except Exception:
+        pass
+
+
+def _fetch(fn, *a, tries: int = 3, delay: float = 2.0):
+    """Retry before falling back — most of these failures are one bad reply."""
+    last = None
+    for i in range(tries):
+        try:
+            return fn(*a), None
+        except Exception as e:
+            last = e
+            if i + 1 < tries:
+                time.sleep(delay)
+    return None, last
+
+
 def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
     """Record a venue, or fall back to its last good universe.
 
@@ -270,6 +306,11 @@ def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
     if universe:
         venues[vid] = universe
         LAST_GOOD[vid] = universe
+        try:
+            json.dump(LAST_GOOD, open(LAST_GOOD_PATH, "w", encoding="utf-8"),
+                      ensure_ascii=False)
+        except Exception:
+            pass
         return
     stale = LAST_GOOD.get(vid)
     if stale:
@@ -284,30 +325,23 @@ def build_pairs():
     """Return (pairs, snapshot).  A pair = one canonical ticker on two venues."""
     venues = {}                       # venue id -> {ticker -> leg meta}
     for dex in hl_dexes():
-        try:
-            u = hl_universe(dex)
-            _keep(venues, dex, {t: {"kind": "hl", "sym": m["coin"],
-                                    "vol24": m["vol24"], "created_at": ""}
-                                for t, m in u.items()})
-        except Exception as e:
-            _keep(venues, dex, None, e)
+        u, err = _fetch(hl_universe, dex)
+        _keep(venues, dex,
+              {t: {"kind": "hl", "sym": m["coin"], "vol24": m["vol24"],
+                   "created_at": ""} for t, m in u.items()} if u else None, err)
         time.sleep(REQ_SPACING)
     for v in LIGHTER:
-        try:
-            u = lighter_universe(v)
-            _keep(venues, v, {t: {"kind": "lighter", "venue": v, "sym": t,
-                                  "market_id": m["market_id"], "vol24": m["vol24"],
-                                  "created_at": m["created_at"]}
-                              for t, m in u.items()})
-        except Exception as e:
-            _keep(venues, v, None, e)
+        u, err = _fetch(lighter_universe, v)
+        _keep(venues, v,
+              {t: {"kind": "lighter", "venue": v, "sym": t,
+                   "market_id": m["market_id"], "vol24": m["vol24"],
+                   "created_at": m["created_at"]} for t, m in u.items()}
+              if u else None, err)
     for name, fn in (("okx", okx_universe), ("bitget", bitget_universe)):
-        try:
-            u = fn()
+        u, err = _fetch(fn)
+        if u:
             CEX_FEES[name] = u.pop("_fees", {})
-            _keep(venues, name, u)
-        except Exception as e:
-            _keep(venues, name, None, e)
+        _keep(venues, name, u, err)
 
     # canonical ticker -> [(venue id, leg meta)]
     book: dict = {}
@@ -491,6 +525,7 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     args = ap.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True)
+    _load_last_good()
     uni_path = os.path.join(OUT_DIR, "universe.json")
     prev_snap = {}
     if os.path.exists(uni_path):
