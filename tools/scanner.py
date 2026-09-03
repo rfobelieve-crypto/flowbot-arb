@@ -395,15 +395,44 @@ def build_pairs():
     return pairs, snap
 
 
+# A venue whose universe fetch failed comes back with its whole market list,
+# and a naive set-difference calls every one of them a new listing: 2,006 of
+# the first 2,023 events were that (flow_system TODO 1.05, 2026-09-04). The
+# few REAL ones -- PONS appearing on three venues over three days, GPRO on io
+# then Bitget two days later -- were buried under them.
+#
+# Two rules, and neither one deletes anything (an event that is reclassified
+# stays in the file under its own label, so a later reader can disagree):
+#   * a venue absent from the previous snapshot is `seen_at_start`, never
+#     `listed` -- we did not watch it appear, we just started looking.
+#   * more than MASS_EVENT symbols moving the same way in one venue in one
+#     cycle is a fetch artifact, not a market event: labelled
+#     `mass_reappear` / `mass_vanish`.
+# The threshold is deliberately low. A venue really adding 5 markets in one
+# 3-minute cycle is rarer than a fetch failing, and the mislabelled real
+# event still sits in the file with its timestamp.
+MASS_EVENT = 5
+
+
 def diff_listings(prev: dict, cur: dict, ts: int) -> list:
     rows = []
     for venue, syms in cur.items():
-        before = set(prev.get(venue, []))
-        now = set(syms)
-        for s in sorted(now - before):
-            rows.append([ts, venue, s, "listed" if prev else "seen_at_start"])
-        for s in sorted(before - now):
-            rows.append([ts, venue, s, "delisted_or_inactive"])
+        if venue not in prev:
+            for s in sorted(set(syms)):
+                rows.append([ts, venue, s, "seen_at_start"])
+            continue
+        before, now = set(prev.get(venue, [])), set(syms)
+        added, gone = sorted(now - before), sorted(before - now)
+        add_ev = "mass_reappear" if len(added) >= MASS_EVENT else "listed"
+        gone_ev = ("mass_vanish" if len(gone) >= MASS_EVENT
+                   else "delisted_or_inactive")
+        for s in added:
+            rows.append([ts, venue, s, add_ev])
+        for s in gone:
+            rows.append([ts, venue, s, gone_ev])
+    for venue in prev:
+        if venue not in cur:
+            rows.append([ts, venue, "*", "venue_fetch_missing"])
     return rows
 
 
@@ -575,9 +604,16 @@ def main() -> int:
                     for r in ev:
                         w.writerow(r)
                     fh.close()
+                    n_real = sum(1 for r in ev if r[3] == "listed")
+                    n_mass = sum(1 for r in ev if r[3].startswith("mass_"))
                     log(f"listing events: {len(ev)} "
-                        f"({sum(1 for r in ev if r[3]=='listed')} listed, "
-                        f"{sum(1 for r in ev if r[3].startswith('delisted'))} delisted)")
+                        f"({n_real} listed, "
+                        f"{sum(1 for r in ev if r[3].startswith('delisted'))} delisted"
+                        + (f", {n_mass} mass/artifact" if n_mass else "") + ")")
+                    if n_real:
+                        for r in ev:
+                            if r[3] == "listed":
+                                log(f"  NEW LISTING: {r[1]} {r[2]}")
                 prev_snap = snap
                 json.dump({"asof": int(t0), "pairs": len(pairs), "venues": snap,
                            "cex_fees_bps": CEX_FEES},
