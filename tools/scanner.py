@@ -38,6 +38,15 @@ Pair names keep their v1 spelling for the venues that existed then
 This file only COLLECTS.  Ranking lives in flow_system research/arb/
 scan_rank.py with a metric frozen before this scanner produced its first row.
 
+v4 (2026-09-03) - CEX LEGS. The operator holds a 50% fee rebate on OKX and
+Bitget, and both list the same non-crypto products (OKX: XAG, SPY, QQQ, NVDA,
+TSLA, AAPL, COIN, MSTR; Bitget: those plus XAUT, PAXG, COPPER, NDX100). A
+rebated CEX leg costs ~2.5-3 bps against Lighter's structural 0, which needs a
+band of ~10 bps instead of the 18 bps an unrebated Hyperliquid leg needs. So
+the CEXes join as venues; the pairing logic is unchanged. Fee rates go into
+universe.json (Bitget publishes them per contract), NOT into the CSV -- the row
+schema must stay stable for scan_rank.py.
+
 Run:  python tools/scanner.py            (loops forever; Ctrl+C to stop)
       python tools/scanner.py --once     (one cycle, for smoke tests)
 """
@@ -57,17 +66,26 @@ import requests
 HL = "https://api.hyperliquid.xyz/info"
 LIGHTER = {"lighter": "https://mainnet.zklighter.elliot.ai",
            "lighter-rh": "https://api.rh.lighter.xyz"}
+OKX = "https://www.okx.com/api/v5"
+BITGET = "https://api.bitget.com/api/v2/mix/market"
+BITGET_PT = "USDT-FUTURES"
 
 # Venue id -> pair-name tag.  "" is HL core; anything else is a HIP-3 builder
 # dex id.  The two tags below are pinned to their v1 spelling so pair names
 # recorded since 2026-08-30 keep accumulating in the same series.
 NAME = {"": "HL", "io": "IO"}
+CEX_FEES: dict = {}   # venue -> ticker -> {taker,maker} bps (Bitget publishes them)
+LAST_GOOD: dict = {}  # venue -> universe; a failed fetch reuses it (see below)
 
 # Same underlying, different ticker.  Kept deliberately short: a wrong entry
 # here manufactures a permanent fake spread.  ETF-vs-index look-alikes
 # (SPY/SP500, QQQ/XYZ100, USO/CL, SLV/SILVER) are NOT aliased — different
 # units and different carry; the scale guard would drop them anyway.
-CANON = {"OPENAI": "OAI", "ANTHROPIC": "ANTH", "XAU": "GOLD", "XAG": "SILVER"}
+# XAUT/PAXG are tokenised gold: they track spot gold but carry their own token
+# basis, so pairing them with GOLD is a HYPOTHESIS for the convergence gate to
+# test, not an identity. Same reasoning that keeps SPY/SP500 unaliased.
+CANON = {"OPENAI": "OAI", "ANTHROPIC": "ANTH", "XAU": "GOLD", "XAG": "SILVER",
+         "XAUT": "GOLD", "PAXG": "GOLD"}
 
 MIN_VOL24_USD = 1.0        # a market with no 24h volume is not a leg
 SCALE_MAX = 2.0            # legs whose mids differ by more than this are not
@@ -75,10 +93,11 @@ SCALE_MIN = 0.5            # the same instrument (index vs ETF, etc.)
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "logs", "scan")
-CYCLE_SEC = 120
+CYCLE_SEC = 180
 UNIVERSE_REFRESH_SEC = 1800
 REQ_SPACING = 0.06          # be polite to Lighter's public REST
 HL_WORKERS = 4              # HL allows ~600 l2Book calls/min; this stays well under
+CEX_WORKERS = 4             # OKX/Bitget public books; well inside their IP limits
 TIMEOUT = 12
 
 HEADER = ["ts", "time_utc", "pair", "leg_a", "sym_a", "leg_b", "sym_b",
@@ -150,30 +169,127 @@ def lighter_universe(venue: str) -> dict:
     return out
 
 
+def okx_universe() -> dict:
+    """ticker -> leg meta. OKX quotes size in CONTRACTS, so ctVal rides along
+    for the notional maths."""
+    inst = requests.get(f"{OKX}/public/instruments",
+                        params={"instType": "SWAP"}, timeout=TIMEOUT).json()
+    tick = requests.get(f"{OKX}/market/tickers",
+                        params={"instType": "SWAP"}, timeout=TIMEOUT).json()
+    vol = {t["instId"]: float(t.get("volCcy24h") or 0) * float(t.get("last") or 0)
+           for t in tick.get("data", [])}
+    out = {}
+    for d in inst.get("data", []):
+        iid = d["instId"]
+        if d.get("state") != "live" or not iid.endswith("-USDT-SWAP"):
+            continue
+        v = vol.get(iid, 0.0)
+        if v < MIN_VOL24_USD:
+            continue
+        out[iid.split("-")[0]] = {"kind": "okx", "venue": "okx", "sym": iid,
+                                  "mult": float(d.get("ctVal") or 1.0),
+                                  "vol24": v, "created_at": ""}
+    return out
+
+
+def bitget_universe() -> dict:
+    con = requests.get(f"{BITGET}/contracts",
+                       params={"productType": BITGET_PT}, timeout=TIMEOUT).json()
+    tick = requests.get(f"{BITGET}/tickers",
+                        params={"productType": BITGET_PT}, timeout=TIMEOUT).json()
+    vol = {t["symbol"]: float(t.get("usdtVolume") or 0)
+           for t in (tick.get("data") or [])}
+    out, fees = {}, {}
+    for d in (con.get("data") or []):
+        sym = d["symbol"]
+        if d.get("symbolStatus") not in (None, "normal") or d.get("quoteCoin") != "USDT":
+            continue
+        v = vol.get(sym, 0.0)
+        if v < MIN_VOL24_USD:
+            continue
+        base = d.get("baseCoin") or sym[:-4]
+        out[base] = {"kind": "bitget", "venue": "bitget", "sym": sym,
+                     "mult": float(d.get("sizeMultiplier") or 1.0),
+                     "vol24": v, "created_at": ""}
+        fees[base] = {"taker": round(float(d.get("takerFeeRate") or 0) * 1e4, 2),
+                      "maker": round(float(d.get("makerFeeRate") or 0) * 1e4, 2)}
+    out["_fees"] = fees            # popped by build_pairs, kept for universe.json
+    return out
+
+
+def okx_top(inst_id: str, mult: float):
+    r = requests.get(f"{OKX}/market/books", params={"instId": inst_id, "sz": 1},
+                     timeout=TIMEOUT).json()
+    d = (r.get("data") or [{}])[0]
+    b, a = d.get("bids") or [], d.get("asks") or []
+    if not b or not a:
+        return None
+    bp, bs = float(b[0][0]), float(b[0][1]) * mult
+    ap, asz = float(a[0][0]), float(a[0][1]) * mult
+    return bp, ap, bp * bs, ap * asz
+
+
+def bitget_top(symbol: str, mult: float):
+    r = requests.get(f"{BITGET}/orderbook",
+                     params={"symbol": symbol, "productType": BITGET_PT,
+                             "limit": 1}, timeout=TIMEOUT).json()
+    d = r.get("data") or {}
+    b, a = d.get("bids") or [], d.get("asks") or []
+    if not b or not a:
+        return None
+    bp, bs = float(b[0][0]), float(b[0][1]) * mult
+    ap, asz = float(a[0][0]), float(a[0][1]) * mult
+    return bp, ap, bp * bs, ap * asz
+
+
+def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
+    """Record a venue, or fall back to its last good universe.
+
+    A transient REST failure must never quietly shrink the scan: on
+    2026-09-03 one JSONDecodeError from Lighter cut 1629 pairs to 1068 for a
+    full refresh interval, with one log line as the only evidence.
+    """
+    if universe:
+        venues[vid] = universe
+        LAST_GOOD[vid] = universe
+        return
+    stale = LAST_GOOD.get(vid)
+    if stale:
+        venues[vid] = stale
+        log(f"{vid or 'hl_core'} universe failed ({err!r}) - reusing last good "
+            f"({len(stale)} symbols)")
+    else:
+        log(f"{vid or 'hl_core'} universe failed ({err!r}) - no cached copy")
+
+
 def build_pairs():
     """Return (pairs, snapshot).  A pair = one canonical ticker on two venues."""
     venues = {}                       # venue id -> {ticker -> leg meta}
     for dex in hl_dexes():
         try:
             u = hl_universe(dex)
+            _keep(venues, dex, {t: {"kind": "hl", "sym": m["coin"],
+                                    "vol24": m["vol24"], "created_at": ""}
+                                for t, m in u.items()})
         except Exception as e:
-            log(f"HL meta {dex or 'core'} failed: {e!r}")
-            continue
-        if u:
-            venues[dex] = {t: {"kind": "hl", "sym": m["coin"],
-                               "vol24": m["vol24"], "created_at": ""}
-                           for t, m in u.items()}
+            _keep(venues, dex, None, e)
         time.sleep(REQ_SPACING)
     for v in LIGHTER:
         try:
             u = lighter_universe(v)
+            _keep(venues, v, {t: {"kind": "lighter", "venue": v, "sym": t,
+                                  "market_id": m["market_id"], "vol24": m["vol24"],
+                                  "created_at": m["created_at"]}
+                              for t, m in u.items()})
         except Exception as e:
-            log(f"lighter {v} failed: {e!r}")
-            continue
-        venues[v] = {t: {"kind": "lighter", "venue": v, "sym": t,
-                         "market_id": m["market_id"], "vol24": m["vol24"],
-                         "created_at": m["created_at"]}
-                     for t, m in u.items()}
+            _keep(venues, v, None, e)
+    for name, fn in (("okx", okx_universe), ("bitget", bitget_universe)):
+        try:
+            u = fn()
+            CEX_FEES[name] = u.pop("_fees", {})
+            _keep(venues, name, u)
+        except Exception as e:
+            _keep(venues, name, None, e)
 
     # canonical ticker -> [(venue id, leg meta)]
     book: dict = {}
@@ -246,9 +362,18 @@ def quote_all(pairs: list) -> dict:
             jobs[k] = m
     hl_jobs = [k for k in jobs if k[0] == "hl"]
     lt_jobs = [k for k in jobs if k[0] == "lighter"]
+    cex_jobs = [k for k in jobs if k[0] in ("okx", "bitget")]
     out = {}
     with ThreadPoolExecutor(max_workers=HL_WORKERS) as ex:
         for k, q in zip(hl_jobs, ex.map(lambda k: _safe(hl_top, k[2]), hl_jobs)):
+            out[k] = q
+
+    def _cex(k):
+        fn = okx_top if k[0] == "okx" else bitget_top
+        return _safe(fn, k[2], jobs[k].get("mult", 1.0))
+
+    with ThreadPoolExecutor(max_workers=CEX_WORKERS) as ex:
+        for k, q in zip(cex_jobs, ex.map(_cex, cex_jobs)):
             out[k] = q
     for k in lt_jobs:
         out[k] = _safe(lighter_top, k[1], jobs[k]["market_id"])
@@ -349,7 +474,8 @@ def main() -> int:
                         f"({sum(1 for r in ev if r[3]=='listed')} listed, "
                         f"{sum(1 for r in ev if r[3].startswith('delisted'))} delisted)")
                 prev_snap = snap
-                json.dump({"asof": int(t0), "pairs": len(pairs), "venues": snap},
+                json.dump({"asof": int(t0), "pairs": len(pairs), "venues": snap,
+                           "cex_fees_bps": CEX_FEES},
                           open(uni_path, "w", encoding="utf-8"), ensure_ascii=False)
                 log(f"universe: {len(pairs)} pairs over {len(snap)} venues "
                     + ", ".join(f"{v}:{len(s)}" for v, s in snap.items()))
