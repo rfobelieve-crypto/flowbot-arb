@@ -47,6 +47,13 @@ the CEXes join as venues; the pairing logic is unchanged. Fee rates go into
 universe.json (Bitget publishes them per contract), NOT into the CSV -- the row
 schema must stay stable for scan_rank.py.
 
+v5 (2026-09-03) - CUMULATIVE DEPTH. Top-of-book was the only size recorded,
+so every capacity estimate assumed you can trade the first level and nothing
+else. A live Bitget XAUT book: $752 at best, $5,974 within 0.5 bps. Now each
+row also carries the depth reachable within 1 bps and within 3 bps on both
+legs, so "how much can actually be traded" stops being a guess. Written to
+scan_v5_YYYYMMDD.csv; the frozen promotion metric still reads top-of-book.
+
 Run:  python tools/scanner.py            (loops forever; Ctrl+C to stop)
       python tools/scanner.py --once     (one cycle, for smoke tests)
 """
@@ -104,7 +111,15 @@ HEADER = ["ts", "time_utc", "pair", "leg_a", "sym_a", "leg_b", "sym_b",
           "a_bid", "a_ask", "b_bid", "b_ask",
           "a_bid_usd", "a_ask_usd", "b_bid_usd", "b_ask_usd",
           "sell_edge_bps", "buy_edge_bps", "a_spread_bps", "b_spread_bps",
-          "b_vol24_usd", "b_created_at"]
+          "b_vol24_usd", "b_created_at",
+          # v5: cumulative size reachable within 1 / 3 bps of the best price.
+          # Top-of-book is what you get at zero slippage; these say what you
+          # get if you are willing to pay a little, which is how the trade is
+          # actually sized.
+          "a_bid_usd_1bps", "a_ask_usd_1bps", "b_bid_usd_1bps", "b_ask_usd_1bps",
+          "a_bid_usd_3bps", "a_ask_usd_3bps", "b_bid_usd_3bps", "b_ask_usd_3bps"]
+DEPTH_BPS = (1.0, 3.0)
+BOOK_LEVELS = 25
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -218,28 +233,31 @@ def bitget_universe() -> dict:
 
 
 def okx_top(inst_id: str, mult: float):
-    r = requests.get(f"{OKX}/market/books", params={"instId": inst_id, "sz": 1},
+    r = requests.get(f"{OKX}/market/books",
+                     params={"instId": inst_id, "sz": BOOK_LEVELS},
                      timeout=TIMEOUT).json()
     d = (r.get("data") or [{}])[0]
     b, a = d.get("bids") or [], d.get("asks") or []
     if not b or not a:
         return None
-    bp, bs = float(b[0][0]), float(b[0][1]) * mult
-    ap, asz = float(a[0][0]), float(a[0][1]) * mult
-    return bp, ap, bp * bs, ap * asz
+    bids = [(float(x[0]), float(x[1])) for x in b]
+    asks = [(float(x[0]), float(x[1])) for x in a]
+    return (bids[0][0], asks[0][0],
+            _cum(bids, bids[0][0], True, mult), _cum(asks, asks[0][0], False, mult))
 
 
 def bitget_top(symbol: str, mult: float):
     r = requests.get(f"{BITGET}/orderbook",
                      params={"symbol": symbol, "productType": BITGET_PT,
-                             "limit": 1}, timeout=TIMEOUT).json()
+                             "limit": BOOK_LEVELS}, timeout=TIMEOUT).json()
     d = r.get("data") or {}
     b, a = d.get("bids") or [], d.get("asks") or []
     if not b or not a:
         return None
-    bp, bs = float(b[0][0]), float(b[0][1]) * mult
-    ap, asz = float(a[0][0]), float(a[0][1]) * mult
-    return bp, ap, bp * bs, ap * asz
+    bids = [(float(x[0]), float(x[1])) for x in b]
+    asks = [(float(x[0]), float(x[1])) for x in a]
+    return (bids[0][0], asks[0][0],
+            _cum(bids, bids[0][0], True, mult), _cum(asks, asks[0][0], False, mult))
 
 
 def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
@@ -329,27 +347,47 @@ def diff_listings(prev: dict, cur: dict, ts: int) -> list:
 
 # ───────────────────────────────────────────────────────────────── quotes ──
 
+def _cum(levels, best: float, is_bid: bool, mult: float = 1.0) -> tuple:
+    """(top-of-book USD, USD within 1 bps, USD within 3 bps).
+
+    levels: [(price, size), ...] already sorted best-first.
+    A bid is reachable down to best*(1-x); an ask up to best*(1+x).
+    """
+    out, top = [], 0.0
+    for i, bps in enumerate(DEPTH_BPS):
+        lim = best * (1 - bps / 1e4) if is_bid else best * (1 + bps / 1e4)
+        cum = 0.0
+        for px, sz in levels:
+            if (px < lim) if is_bid else (px > lim):
+                break
+            cum += px * sz * mult
+        out.append(round(cum, 2))
+    if levels:
+        top = round(levels[0][0] * levels[0][1] * mult, 2)
+    return (top, *out)
+
+
 def hl_top(coin: str):
     r = requests.post(HL, json={"type": "l2Book", "coin": coin},
                       timeout=TIMEOUT).json()
     lv = r.get("levels") or [[], []]
     if not lv[0] or not lv[1]:
         return None
-    b, a = lv[0][0], lv[1][0]
-    bp, bs, ap, asz = float(b["px"]), float(b["sz"]), float(a["px"]), float(a["sz"])
-    return bp, ap, bp * bs, ap * asz
+    bids = [(float(x["px"]), float(x["sz"])) for x in lv[0][:BOOK_LEVELS]]
+    asks = [(float(x["px"]), float(x["sz"])) for x in lv[1][:BOOK_LEVELS]]
+    return bids[0][0], asks[0][0], _cum(bids, bids[0][0], True), _cum(asks, asks[0][0], False)
 
 
 def lighter_top(venue: str, market_id: int):
     r = requests.get(LIGHTER[venue] + "/api/v1/orderBookOrders",
-                     params={"market_id": market_id, "limit": 1},
+                     params={"market_id": market_id, "limit": BOOK_LEVELS},
                      timeout=TIMEOUT).json()
-    bids, asks = r.get("bids") or [], r.get("asks") or []
-    if not bids or not asks:
+    b, a = r.get("bids") or [], r.get("asks") or []
+    if not b or not a:
         return None
-    bp = float(bids[0]["price"]); bs = float(bids[0]["remaining_base_amount"])
-    ap = float(asks[0]["price"]); asz = float(asks[0]["remaining_base_amount"])
-    return bp, ap, bp * bs, ap * asz
+    bids = [(float(x["price"]), float(x["remaining_base_amount"])) for x in b]
+    asks = [(float(x["price"]), float(x["remaining_base_amount"])) for x in a]
+    return bids[0][0], asks[0][0], _cum(bids, bids[0][0], True), _cum(asks, asks[0][0], False)
 
 
 def quote_all(pairs: list) -> dict:
@@ -405,7 +443,7 @@ def scan_once(pairs: list) -> tuple:
     tiso = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     day = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
     q = quote_all(pairs)
-    fh, w = _writer(os.path.join(OUT_DIR, f"scan_{day}.csv"), HEADER)
+    fh, w = _writer(os.path.join(OUT_DIR, f"scan_v5_{day}.csv"), HEADER)
     n_ok = n_scale = 0
     try:
         for p in pairs:
@@ -415,8 +453,10 @@ def scan_once(pairs: list) -> tuple:
                 b = q.get((mb["kind"], mb.get("venue", ""), mb["sym"]))
                 if a is None or b is None:
                     continue
-                a_bid, a_ask, a_bid_usd, a_ask_usd = a
-                b_bid, b_ask, b_bid_usd, b_ask_usd = b
+                a_bid, a_ask, a_bidd, a_askd = a
+                b_bid, b_ask, b_bidd, b_askd = b
+                a_bid_usd, b_bid_usd = a_bidd[0], b_bidd[0]
+                a_ask_usd, b_ask_usd = a_askd[0], b_askd[0]
                 if min(a_bid, a_ask, b_bid, b_ask) <= 0:
                     continue
                 ratio = ((a_bid + a_ask) / 2) / ((b_bid + b_ask) / 2)
@@ -434,7 +474,9 @@ def scan_once(pairs: list) -> tuple:
                             round((a_ask / a_bid - 1) * 1e4, 3),
                             round((b_ask / b_bid - 1) * 1e4, 3),
                             round(mb.get("vol24") or 0.0, 0),
-                            mb.get("created_at") or ""])
+                            mb.get("created_at") or "",
+                            a_bidd[1], a_askd[1], b_bidd[1], b_askd[1],
+                            a_bidd[2], a_askd[2], b_bidd[2], b_askd[2]])
                 n_ok += 1
             except Exception as e:              # one pair must never kill the cycle
                 log(f"pair {p['pair']} failed: {e!r}")
