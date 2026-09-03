@@ -1,22 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Cross-venue premium SCANNER (flow_system TODO §0.75b, 2026-08-30).
+"""Cross-venue premium SCANNER (flow_system TODO §0.75b).
 
 REST-only, no websockets, no credentials, no orders. Every cycle it snapshots
-best bid/ask + top-of-book depth for EVERY symbol listed on both legs of
+best bid/ask + top-of-book depth for every symbol that TWO venues both list,
+and appends one row per pair to logs/scan/scan_YYYYMMDD.csv. It also diffs each
+venue's market list every cycle into logs/scan/listings.csv.
 
-    Hyperliquid core  x  Lighter mainnet
-    Hyperliquid core  x  Lighter Robinhood chain
-    Entropy (HIP-3 dex "io")  x  Lighter mainnet / RH   (ticker aliases)
+v3 (2026-09-03) — BREADTH: every live Hyperliquid dex, not just Entropy
+--------------------------------------------------------------------
+v1/v2 scanned HL-core x Lighter and Entropy("io") x Lighter = 113 pairs, all
+crypto plus 5 stock perps.  But Hyperliquid has ELEVEN perp dexes (`perpDexs`),
+and the biggest of them is not io: `xyz` turns over ~$2.2B/24h and lists GOLD,
+SILVER, COPPER, PLATINUM, PALLADIUM, CL + BRENTOIL, NATGAS, SP500, XYZ100,
+JP225, KR200, EUR/GBP/JPY and ~90 single stocks.  `para` lists 2Y/10Y/30Y
+yields and more stocks; `mkts` lists index perps.  Several of those tickers
+are ALSO on Lighter's Robinhood chain (XAU, XAG, SPY, QQQ, USO, SLV, 20+
+stocks) and on each other.  Same underlying, different books = the same
+question this line already asks, on instruments that are not crypto.
 
-and appends one row per pair to logs/scan/scan_YYYYMMDD.csv. It also diffs
-each venue's market list every cycle and appends listing/delisting events to
-logs/scan/listings.csv (new listings are where the user expects the fat
-mispricings to live; delistings are where two registered pairs died on
-2026-08-30 before recording a single row).
+Three things this version adds, all COLLECTION-side (the promotion metric in
+flow_system research/arb/scan_rank.py is untouched and stays frozen):
+  1. venues = HL core + EVERY builder dex + both Lighter chains
+  2. pairs = every canonical ticker carried by >= 2 venues, including
+     HL-dex vs HL-dex (same chain, no bridge — a materially easier trade)
+  3. two cheap instrument guards, because breadth multiplies the ways a
+     number can be fake:
+       * an asset with 0 USD of 24h volume on its venue is not a leg
+         (flx/vntl/km/abcd/cash were all $0 with empty books on 2026-09-03)
+       * SCALE GUARD: if the two legs' mids differ by more than 2x, the
+         tickers are not the same unit (index vs ETF, e.g. SP500 vs SPY) —
+         skip the row and log it, rather than record a 9000 bps "edge"
 
-This file only COLLECTS. Ranking lives in flow_system research/arb/scan_rank.py
-with a metric frozen before this scanner produced its first row.
+Pair names keep their v1 spelling for the venues that existed then
+("BTC@HL-lighter", "ANTH@IO-lighter") so their history stays one series.
+
+This file only COLLECTS.  Ranking lives in flow_system research/arb/
+scan_rank.py with a metric frozen before this scanner produced its first row.
 
 Run:  python tools/scanner.py            (loops forever; Ctrl+C to stop)
       python tools/scanner.py --once     (one cycle, for smoke tests)
@@ -29,6 +49,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -36,15 +57,28 @@ import requests
 HL = "https://api.hyperliquid.xyz/info"
 LIGHTER = {"lighter": "https://mainnet.zklighter.elliot.ai",
            "lighter-rh": "https://api.rh.lighter.xyz"}
-ENTROPY_DEX = "io"
-# Entropy ticker -> Lighter ticker where they differ
-ALIAS = {"OAI": "OPENAI", "ANTH": "ANTHROPIC"}
+
+# Venue id -> pair-name tag.  "" is HL core; anything else is a HIP-3 builder
+# dex id.  The two tags below are pinned to their v1 spelling so pair names
+# recorded since 2026-08-30 keep accumulating in the same series.
+NAME = {"": "HL", "io": "IO"}
+
+# Same underlying, different ticker.  Kept deliberately short: a wrong entry
+# here manufactures a permanent fake spread.  ETF-vs-index look-alikes
+# (SPY/SP500, QQQ/XYZ100, USO/CL, SLV/SILVER) are NOT aliased — different
+# units and different carry; the scale guard would drop them anyway.
+CANON = {"OPENAI": "OAI", "ANTHROPIC": "ANTH", "XAU": "GOLD", "XAG": "SILVER"}
+
+MIN_VOL24_USD = 1.0        # a market with no 24h volume is not a leg
+SCALE_MAX = 2.0            # legs whose mids differ by more than this are not
+SCALE_MIN = 0.5            # the same instrument (index vs ETF, etc.)
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "logs", "scan")
 CYCLE_SEC = 120
 UNIVERSE_REFRESH_SEC = 1800
 REQ_SPACING = 0.06          # be polite to Lighter's public REST
+HL_WORKERS = 4              # HL allows ~600 l2Book calls/min; this stays well under
 TIMEOUT = 12
 
 HEADER = ["ts", "time_utc", "pair", "leg_a", "sym_a", "leg_b", "sym_b",
@@ -65,19 +99,40 @@ def log(msg: str) -> None:
 
 # ─────────────────────────────────────────────────────────────── universe ──
 
+def hl_dexes() -> list:
+    """[""] + every builder dex id."""
+    try:
+        r = requests.post(HL, json={"type": "perpDexs"}, timeout=TIMEOUT).json()
+    except Exception as e:
+        log(f"perpDexs failed: {e!r}")
+        return [""]
+    out = [""]
+    for d in r:
+        if d and d.get("name"):
+            out.append(d["name"])
+    return out
+
+
 def hl_universe(dex: str = "") -> dict:
-    body = {"type": "meta"}
+    """short ticker -> {coin, vol24}.  Zero-volume assets are dropped."""
+    body = {"type": "metaAndAssetCtxs"}
     if dex:
         body["dex"] = dex
     r = requests.post(HL, json=body, timeout=TIMEOUT).json()
+    meta, ctxs = r[0], r[1]
     out = {}
-    for a in r.get("universe", []):
+    for a, c in zip(meta.get("universe", []), ctxs):
         if a.get("isDelisted"):
             continue
+        try:
+            vol = float(c.get("dayNtlVlm") or 0.0)
+        except (TypeError, ValueError):
+            vol = 0.0
+        if vol < MIN_VOL24_USD:
+            continue
         name = a["name"]
-        short = name.split(":")[-1]
-        out[short] = name
-    return out                      # short ticker -> HL coin name
+        out[name.split(":")[-1]] = {"coin": name, "vol24": vol}
+    return out
 
 
 def lighter_universe(venue: str) -> dict:
@@ -96,25 +151,51 @@ def lighter_universe(venue: str) -> dict:
 
 
 def build_pairs():
-    """Return (pairs, snapshot) where pairs = list of dicts with legs."""
-    hl_core = hl_universe("")
-    hl_io = hl_universe(ENTROPY_DEX)
-    lt = {v: lighter_universe(v) for v in LIGHTER}
+    """Return (pairs, snapshot).  A pair = one canonical ticker on two venues."""
+    venues = {}                       # venue id -> {ticker -> leg meta}
+    for dex in hl_dexes():
+        try:
+            u = hl_universe(dex)
+        except Exception as e:
+            log(f"HL meta {dex or 'core'} failed: {e!r}")
+            continue
+        if u:
+            venues[dex] = {t: {"kind": "hl", "sym": m["coin"],
+                               "vol24": m["vol24"], "created_at": ""}
+                           for t, m in u.items()}
+        time.sleep(REQ_SPACING)
+    for v in LIGHTER:
+        try:
+            u = lighter_universe(v)
+        except Exception as e:
+            log(f"lighter {v} failed: {e!r}")
+            continue
+        venues[v] = {t: {"kind": "lighter", "venue": v, "sym": t,
+                         "market_id": m["market_id"], "vol24": m["vol24"],
+                         "created_at": m["created_at"]}
+                     for t, m in u.items()}
+
+    # canonical ticker -> [(venue id, leg meta)]
+    book: dict = {}
+    for vid, syms in venues.items():
+        for t, meta in syms.items():
+            book.setdefault(CANON.get(t, t), []).append((vid, meta))
+
+    order = list(venues)
     pairs = []
-    for v, lu in lt.items():
-        for short, coin in hl_core.items():
-            if short in lu:
-                pairs.append({"pair": f"{short}@HL-{v}", "leg_a": "HL",
-                              "sym_a": coin, "leg_b": v, "sym_b": short,
-                              "b_meta": lu[short]})
-        for short, coin in hl_io.items():
-            bsym = ALIAS.get(short, short)
-            if bsym in lu:
-                pairs.append({"pair": f"{short}@IO-{v}", "leg_a": "ENTROPY",
-                              "sym_a": coin, "leg_b": v, "sym_b": bsym,
-                              "b_meta": lu[bsym]})
-    snap = {"hl_core": sorted(hl_core), "hl_io": sorted(hl_io),
-            **{f"{v}": sorted(lu) for v, lu in lt.items()}}
+    for canon, legs in book.items():
+        if len(legs) < 2:
+            continue
+        legs.sort(key=lambda x: order.index(x[0]))
+        for i in range(len(legs)):
+            for j in range(i + 1, len(legs)):
+                (va, ma), (vb, mb) = legs[i], legs[j]
+                pairs.append({
+                    "pair": f"{canon}@{NAME.get(va, va)}-{NAME.get(vb, vb)}",
+                    "leg_a": NAME.get(va, va), "a": ma,
+                    "leg_b": NAME.get(vb, vb), "b": mb,
+                })
+    snap = {(vid or "hl_core"): sorted(syms) for vid, syms in venues.items()}
     return pairs, snap
 
 
@@ -155,6 +236,33 @@ def lighter_top(venue: str, market_id: int):
     return bp, ap, bp * bs, ap * asz
 
 
+def quote_all(pairs: list) -> dict:
+    """One quote per distinct leg per cycle, keyed (kind, venue, sym)."""
+    jobs = {}
+    for p in pairs:
+        for side in ("a", "b"):
+            m = p[side]
+            k = (m["kind"], m.get("venue", ""), m["sym"])
+            jobs[k] = m
+    hl_jobs = [k for k in jobs if k[0] == "hl"]
+    lt_jobs = [k for k in jobs if k[0] == "lighter"]
+    out = {}
+    with ThreadPoolExecutor(max_workers=HL_WORKERS) as ex:
+        for k, q in zip(hl_jobs, ex.map(lambda k: _safe(hl_top, k[2]), hl_jobs)):
+            out[k] = q
+    for k in lt_jobs:
+        out[k] = _safe(lighter_top, k[1], jobs[k]["market_id"])
+        time.sleep(REQ_SPACING)
+    return out
+
+
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception:
+        return None
+
+
 # ───────────────────────────────────────────────────────────────── output ──
 
 def _writer(path: str, header: list):
@@ -167,47 +275,48 @@ def _writer(path: str, header: list):
     return fh, w
 
 
-def scan_once(pairs: list) -> int:
+def scan_once(pairs: list) -> tuple:
     ts = int(time.time())
     tiso = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     day = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
+    q = quote_all(pairs)
     fh, w = _writer(os.path.join(OUT_DIR, f"scan_{day}.csv"), HEADER)
-    n_ok = 0
-    hl_cache: dict = {}
+    n_ok = n_scale = 0
     try:
         for p in pairs:
             try:
-                if p["sym_a"] not in hl_cache:
-                    hl_cache[p["sym_a"]] = hl_top(p["sym_a"])
-                    time.sleep(REQ_SPACING)
-                a = hl_cache[p["sym_a"]]
-                b = lighter_top(p["leg_b"], p["b_meta"]["market_id"])
-                time.sleep(REQ_SPACING)
+                ma, mb = p["a"], p["b"]
+                a = q.get((ma["kind"], ma.get("venue", ""), ma["sym"]))
+                b = q.get((mb["kind"], mb.get("venue", ""), mb["sym"]))
                 if a is None or b is None:
                     continue
                 a_bid, a_ask, a_bid_usd, a_ask_usd = a
                 b_bid, b_ask, b_bid_usd, b_ask_usd = b
                 if min(a_bid, a_ask, b_bid, b_ask) <= 0:
                     continue
+                ratio = ((a_bid + a_ask) / 2) / ((b_bid + b_ask) / 2)
+                if not (SCALE_MIN <= ratio <= SCALE_MAX):
+                    n_scale += 1                 # not the same unit — see docstring
+                    continue
                 sell_edge = (a_bid / b_ask - 1) * 1e4     # sell A, buy B
                 buy_edge = (b_bid / a_ask - 1) * 1e4      # buy A, sell B
-                w.writerow([ts, tiso, p["pair"], p["leg_a"], p["sym_a"],
-                            p["leg_b"], p["sym_b"],
+                w.writerow([ts, tiso, p["pair"], p["leg_a"], ma["sym"],
+                            p["leg_b"], mb["sym"],
                             a_bid, a_ask, b_bid, b_ask,
                             round(a_bid_usd, 2), round(a_ask_usd, 2),
                             round(b_bid_usd, 2), round(b_ask_usd, 2),
                             round(sell_edge, 3), round(buy_edge, 3),
                             round((a_ask / a_bid - 1) * 1e4, 3),
                             round((b_ask / b_bid - 1) * 1e4, 3),
-                            round(p["b_meta"]["vol24"], 0),
-                            p["b_meta"]["created_at"]])
+                            round(mb.get("vol24") or 0.0, 0),
+                            mb.get("created_at") or ""])
                 n_ok += 1
-            except Exception as e:                      # one pair must never kill the cycle
+            except Exception as e:              # one pair must never kill the cycle
                 log(f"pair {p['pair']} failed: {e!r}")
         fh.flush()
     finally:
         fh.close()
-    return n_ok
+    return n_ok, n_scale
 
 
 def main() -> int:
@@ -242,11 +351,11 @@ def main() -> int:
                 prev_snap = snap
                 json.dump({"asof": int(t0), "pairs": len(pairs), "venues": snap},
                           open(uni_path, "w", encoding="utf-8"), ensure_ascii=False)
-                log(f"universe: {len(pairs)} pairs "
-                    f"(HL core {len(snap['hl_core'])}, io {len(snap['hl_io'])}, "
-                    f"lighter {len(snap['lighter'])}, rh {len(snap['lighter-rh'])})")
-            n = scan_once(pairs)
-            log(f"cycle: {n}/{len(pairs)} pairs quoted in {time.time()-t0:.1f}s")
+                log(f"universe: {len(pairs)} pairs over {len(snap)} venues "
+                    + ", ".join(f"{v}:{len(s)}" for v, s in snap.items()))
+            n, n_scale = scan_once(pairs)
+            log(f"cycle: {n}/{len(pairs)} pairs quoted in {time.time()-t0:.1f}s"
+                + (f" ({n_scale} skipped: scale mismatch)" if n_scale else ""))
         except Exception as e:
             log(f"cycle failed: {e!r}")
         if args.once:
