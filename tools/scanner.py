@@ -296,12 +296,23 @@ def _fetch(fn, *a, tries: int = 3, delay: float = 2.0):
     return None, last
 
 
-def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
+def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> str:
     """Record a venue, or fall back to its last good universe.
 
     A transient REST failure must never quietly shrink the scan: on
     2026-09-03 one JSONDecodeError from Lighter cut 1629 pairs to 1068 for a
     full refresh interval, with one log line as the only evidence.
+
+    Returns one of four OUTCOMES, because they are four different events and
+    the log used to print three of them as the same sentence ("universe
+    failed"). Six of the eleven HL dexes carry no traded market at all — every
+    refresh printed six failure lines for a venue that is simply empty, which
+    is how a real failure gets lost among the noise:
+
+      ok     - fetched, has markets
+      empty  - fetched fine, the venue genuinely has nothing with volume
+      stale  - fetch failed OR came back suspiciously empty; reusing cache
+      lost   - fetch failed and there is no cache
     """
     if universe:
         venues[vid] = universe
@@ -311,37 +322,54 @@ def _keep(venues: dict, vid: str, universe: dict | None, err=None) -> None:
                       ensure_ascii=False)
         except Exception:
             pass
-        return
+        return "ok"
     stale = LAST_GOOD.get(vid)
+    if err is None and not stale:
+        # Fetch succeeded and returned nothing. For flx/vntl/km/abcd/cash/hyna
+        # that IS the answer, and it is not news. Counted, not logged.
+        return "empty"
     if stale:
         venues[vid] = stale
-        log(f"{vid or 'hl_core'} universe failed ({err!r}) - reusing last good "
+        # An empty reply from a venue that had markets a moment ago is far more
+        # likely to be an upstream glitch than a mass delisting, so it takes the
+        # same path as an exception — but it says which one happened.
+        why = repr(err) if err is not None else "returned an EMPTY universe"
+        log(f"{vid or 'hl_core'} universe {why} - reusing last good "
             f"({len(stale)} symbols)")
-    else:
-        log(f"{vid or 'hl_core'} universe failed ({err!r}) - no cached copy")
+        return "stale"
+    log(f"{vid or 'hl_core'} universe FETCH FAILED ({err!r}) - no cached copy, "
+        f"this venue is missing from this cycle")
+    return "lost"
 
 
 def build_pairs():
     """Return (pairs, snapshot).  A pair = one canonical ticker on two venues."""
     venues = {}                       # venue id -> {ticker -> leg meta}
+    empty = []                        # venues with nothing traded — one line, not six
     for dex in hl_dexes():
         u, err = _fetch(hl_universe, dex)
-        _keep(venues, dex,
-              {t: {"kind": "hl", "sym": m["coin"], "vol24": m["vol24"],
-                   "created_at": ""} for t, m in u.items()} if u else None, err)
+        if _keep(venues, dex,
+                 {t: {"kind": "hl", "sym": m["coin"], "vol24": m["vol24"],
+                      "created_at": ""} for t, m in u.items()} if u else None,
+                 err) == "empty":
+            empty.append(dex or "hl_core")
         time.sleep(REQ_SPACING)
     for v in LIGHTER:
         u, err = _fetch(lighter_universe, v)
-        _keep(venues, v,
-              {t: {"kind": "lighter", "venue": v, "sym": t,
-                   "market_id": m["market_id"], "vol24": m["vol24"],
-                   "created_at": m["created_at"]} for t, m in u.items()}
-              if u else None, err)
+        if _keep(venues, v,
+                 {t: {"kind": "lighter", "venue": v, "sym": t,
+                      "market_id": m["market_id"], "vol24": m["vol24"],
+                      "created_at": m["created_at"]} for t, m in u.items()}
+                 if u else None, err) == "empty":
+            empty.append(v)
     for name, fn in (("okx", okx_universe), ("bitget", bitget_universe)):
         u, err = _fetch(fn)
         if u:
             CEX_FEES[name] = u.pop("_fees", {})
-        _keep(venues, name, u, err)
+        if _keep(venues, name, u, err) == "empty":
+            empty.append(name)
+    if empty:
+        log(f"no traded market (skipped): {', '.join(empty)}")
 
     # canonical ticker -> [(venue id, leg meta)]
     book: dict = {}
