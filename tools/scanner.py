@@ -75,6 +75,11 @@ LIGHTER = {"lighter": "https://mainnet.zklighter.elliot.ai",
            "lighter-rh": "https://api.rh.lighter.xyz"}
 OKX = "https://www.okx.com/api/v5"
 BITGET = "https://api.bitget.com/api/v2/mix/market"
+# Binance USDT-M futures. Equity perps live here as contractType
+# TRADIFI_PERPETUAL (GPROUSDT, DDOGUSDT, SAMSUNGEMUSDT, KODEX200USDT ...) --
+# a filter on contractType == "PERPETUAL" hides every one of them, which is
+# how this venue was wrongly written off on 2026-09-04 (flow_system TODO 1.04).
+BINANCE = "https://fapi.binance.com/fapi/v1"
 BITGET_PT = "USDT-FUTURES"
 
 # Venue id -> pair-name tag.  "" is HL core; anything else is a HIP-3 builder
@@ -207,6 +212,29 @@ def okx_universe() -> dict:
     return out
 
 
+def binance_universe() -> dict:
+    """ticker -> leg meta. Binance quotes size in BASE COIN (BTCUSDT top bid
+    3.14 = 3.14 BTC ~ $255k, verified 2026-09-04), so mult = 1.0."""
+    ei = requests.get(f"{BINANCE}/exchangeInfo", timeout=TIMEOUT).json()
+    tick = requests.get(f"{BINANCE}/ticker/24hr", timeout=TIMEOUT).json()
+    vol = {t["symbol"]: float(t.get("quoteVolume") or 0) for t in tick}
+    out = {}
+    for d in ei.get("symbols", []):
+        sym = d["symbol"]
+        if (d.get("status") != "TRADING" or d.get("quoteAsset") != "USDT"
+                or "PERPETUAL" not in str(d.get("contractType", ""))):
+            continue
+        v = vol.get(sym, 0.0)
+        if v < MIN_VOL24_USD:
+            continue
+        base = d.get("baseAsset") or sym[:-4]
+        out[base] = {"kind": "binance", "venue": "binance", "sym": sym,
+                     "mult": 1.0, "vol24": v,
+                     "created_at": str(d.get("onboardDate") or ""),
+                     "tradfi": d.get("contractType") == "TRADIFI_PERPETUAL"}
+    return out
+
+
 def bitget_universe() -> dict:
     con = requests.get(f"{BITGET}/contracts",
                        params={"productType": BITGET_PT}, timeout=TIMEOUT).json()
@@ -246,6 +274,22 @@ def okx_top(inst_id: str, mult: float):
                      timeout=TIMEOUT).json()
     d = (r.get("data") or [{}])[0]
     b, a = d.get("bids") or [], d.get("asks") or []
+    if not b or not a:
+        return None
+    bids = [(float(x[0]), float(x[1])) for x in b]
+    asks = [(float(x[0]), float(x[1])) for x in a]
+    return (bids[0][0], asks[0][0],
+            _cum(bids, bids[0][0], True, mult), _cum(asks, asks[0][0], False, mult))
+
+
+def binance_top(symbol: str, mult: float):
+    # Binance only accepts limit in {5,10,20,50,100,500,1000}; 25 (our
+    # BOOK_LEVELS) is rejected with an error body and looked like "no book".
+    lim = next(x for x in (5, 10, 20, 50, 100, 500, 1000) if x >= BOOK_LEVELS)
+    r = requests.get(f"{BINANCE}/depth",
+                     params={"symbol": symbol, "limit": lim},
+                     timeout=TIMEOUT).json()
+    b, a = (r.get("bids") or [])[:BOOK_LEVELS], (r.get("asks") or [])[:BOOK_LEVELS]
     if not b or not a:
         return None
     bids = [(float(x[0]), float(x[1])) for x in b]
@@ -362,7 +406,8 @@ def build_pairs():
                       "created_at": m["created_at"]} for t, m in u.items()}
                  if u else None, err) == "empty":
             empty.append(v)
-    for name, fn in (("okx", okx_universe), ("bitget", bitget_universe)):
+    for name, fn in (("okx", okx_universe), ("bitget", bitget_universe),
+                     ("binance", binance_universe)):
         u, err = _fetch(fn)
         if u:
             CEX_FEES[name] = u.pop("_fees", {})
@@ -491,14 +536,14 @@ def quote_all(pairs: list) -> dict:
             jobs[k] = m
     hl_jobs = [k for k in jobs if k[0] == "hl"]
     lt_jobs = [k for k in jobs if k[0] == "lighter"]
-    cex_jobs = [k for k in jobs if k[0] in ("okx", "bitget")]
+    cex_jobs = [k for k in jobs if k[0] in ("okx", "bitget", "binance")]
     out = {}
     with ThreadPoolExecutor(max_workers=HL_WORKERS) as ex:
         for k, q in zip(hl_jobs, ex.map(lambda k: _safe(hl_top, k[2]), hl_jobs)):
             out[k] = q
 
     def _cex(k):
-        fn = okx_top if k[0] == "okx" else bitget_top
+        fn = {"okx": okx_top, "bitget": bitget_top, "binance": binance_top}[k[0]]
         return _safe(fn, k[2], jobs[k].get("mult", 1.0))
 
     with ThreadPoolExecutor(max_workers=CEX_WORKERS) as ex:
