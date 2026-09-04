@@ -1,0 +1,75 @@
+# SHADOW run of the NBIS pair (2026-09-05). Same thresholds and the same
+# risk block as config_NBIS.yaml -- the point is to rehearse THAT config.
+# Two deliberate differences:
+#   * recorder off: the real recorder already owns logs/NBIS/minutes.csv
+#     and two processes must not write the same CSV
+#   * its own log directory, for the same reason
+# S0.75 recording family - generated 2026-08-30 - stock perp
+# leg A: Entropy(io) NBIS | leg B: lighter NBIS
+entropy:
+  dex: io
+  max_orders_per_min: 120
+  max_position_usd: 40
+  # 2026-09-04: measured, not assumed. HL info `userFees` for our own account
+  # returns userCrossRate 0.00045 / userAddRate 0.00015 -> 4.5 / 1.5 bps, with
+  # activeReferralDiscount and activeStakingDiscount both 0.0. The 0.0 that
+  # used to sit here was the assumption the SNDK verdict overturned.
+  # io's `feeRecipient` is currently null (xyz's is not), so the dex looks to
+  # be charging the base rate only -- but a HIP-3 builder CAN add a fee on
+  # top, so M1's receipt is still what settles this.
+  # 实测值：HL 的 userFees 端点对本帐户返回 4.5/1.5 bps，无返佣无质押折扣。
+  # 原来的 0.0 正是 SNDK 判决推翻的那个假设。
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5
+execution:
+  cooldown_sec: 0.0
+  hedge_slippage_bps: 20.0
+  http_keepalive_sec: 10.0
+  leg_slippage_bps: 50.0
+  max_consecutive_errors: 3
+  net_tolerance_base: 0.001
+  premium_persist_sec: 0
+  rate_limit_pause_sec: 10.0
+  reconcile_sec: 15.0
+  settle_timeout_sec: 10.0
+  staleness_sec: 10.0
+  venue_probe_sec: 30.0
+hedge:
+  max_orders_per_min: 30
+  max_position_usd: 40
+  taker_fee_bps: 0.0
+  symbol: NBIS
+inventory:
+  floor_frac: 0
+  scale_bps: 10.0
+logging:
+  dashboard: false
+  file: logs/NBIS_shadow/engine.log
+  level: INFO
+  status_interval_sec: 30.0
+  trades_csv: logs/NBIS_shadow/trades.csv
+recorder:
+  csv: logs/NBIS_shadow/minutes.csv
+  enabled: false
+sizing:
+  max_order_notional_usd: 20
+  min_order_notional_usd: 10
+  take_fraction: 0.5
+thresholds:
+  lower_bps: 4.0
+  midline_bps: 0.0
+  upper_bps: 4.0
+risk:
+  # ARMED 2026-09-04 for the $50/venue live week (LIVE_50U_SPEC).
+  # Derivation and the measured inputs: docs/RISK_NUMBERS.md.
+  # 本区块的数值来自 docs/RISK_NUMBERS.md，与「每所 $50」这个决定绑定；
+  # 改变每所放多少钱，这里每一个数字都要重算。
+  max_net_base: 0.02          # ~$4.2 at 208 — a broken leg halts, dust does not
+  max_gross_usd: 100.0        # both legs at cap = $80; this is the typo backstop
+  max_daily_loss_usd: 10.0     # 10% of the $100 deployed on this pair
+  max_consecutive_stale: 20
+  halt_flatten_attempts: 3
+  max_edge_bps: 150.0         # measured premium reaches 94 bps; this is "the book is wrong"
+  vol_window_sec: 60.0
+  vol_max_move_bps: 55.0       # measured |1-min move| p99 = 34 bps, scaled for range
+  vol_cooldown_sec: 60.0

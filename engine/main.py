@@ -42,9 +42,23 @@ def setup_logging(level: str, log_file: str = None,
         d = os.path.dirname(log_file)
         if d:
             os.makedirs(d, exist_ok=True)
-        h = logging.FileHandler(log_file)
+        # encoding is NOT optional here. Without it FileHandler uses the
+        # locale codec (cp950 on this box), and every bilingual message in
+        # this engine -- which is every CRITICAL one -- raises
+        # UnicodeEncodeError inside logging and is DROPPED. A guard that
+        # fires into a log line that cannot be written has not fired.
+        # Found 2026-09-05 by running --shadow and watching the banner die.
+        h = logging.FileHandler(log_file, encoding="utf-8")
     else:
         h = logging.StreamHandler()
+        # Same reason, for the console: a cp950 terminal cannot print the
+        # Chinese half of a warning, and logging turns that into a dropped
+        # record rather than a mangled one.
+        for _stream in (sys.stdout, sys.stderr):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:                                   # noqa: BLE001
+                pass
     h.setFormatter(fmt)
     root.addHandler(h)
     if extra_handler is not None:

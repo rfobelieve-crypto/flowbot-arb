@@ -195,6 +195,38 @@ class Engine:
         finally:
             await self.session.close()
 
+    # Startup market load, with retries. A single transient 403/405 from a
+    # CDN in front of a venue used to be fatal: the process died before it
+    # could do anything, and on a VPS that means waiting for a watchdog.
+    # Measured 2026-09-05: Lighter's REST answered 405 for ~minutes (burst
+    # rate limiting) and then went back to 200 on its own. That is a wait,
+    # not a failure.
+    MARKET_LOAD_TRIES = 5
+
+    async def _load_markets(self) -> None:
+        delay = 2.0
+        for attempt in range(1, self.MARKET_LOAD_TRIES + 1):
+            try:
+                await asyncio.gather(self.entropy.load_market(),
+                                     self.hedge.load_market())
+                if attempt > 1:
+                    log.warning("markets loaded on attempt %d", attempt)
+                return
+            except asyncio.CancelledError:
+                raise
+            except RuntimeError:
+                raise      # "not found" / "delisted" -- retrying cannot help
+            except Exception as e:                              # noqa: BLE001
+                if attempt == self.MARKET_LOAD_TRIES:
+                    raise RuntimeError(
+                        f"could not load markets after "
+                        f"{self.MARKET_LOAD_TRIES} attempts: {e!r}") from e
+                log.warning("market load attempt %d/%d failed (%r) — "
+                            "retrying in %.0fs", attempt,
+                            self.MARKET_LOAD_TRIES, e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+
     def _make_venue(self, vc):
         if vc.kind == "lighter":
             return LighterVenue(vc, self.session, self.cfg.settle_timeout_sec)
@@ -206,7 +238,7 @@ class Engine:
         self.entropy = self._make_venue(cfg.entropy)
         self.hedge = self._make_venue(cfg.hedge)
         self.venues = {"entropy": self.entropy, "hedge": self.hedge}
-        await asyncio.gather(self.entropy.load_market(), self.hedge.load_market())
+        await self._load_markets()
         self.markets_ready = True
 
         live = not self.record_only
@@ -630,7 +662,6 @@ class Engine:
         if self._blocked("arb", buy, other=sell, side="BUY+SELL", qty=plan.qty,
                          px=plan.buy_limit, edge_bps=plan.marginal_premium_bps,
                          exp_edge_usd=plan.exp_edge_usd, note=direction):
-            self.last_trade_ts = time.time()
             return False
         self._record_send(buy)
         self._record_send(sell)
@@ -1597,6 +1628,18 @@ class Engine:
         if not self.shadow:
             return False
         self.shadow_decisions += 1
+        # Stamp the venues exactly as a real send would. Without this the
+        # anti-refire guard in _scan ("never act on a book older than this
+        # venue's own last trade") never engages, and shadow re-decides the
+        # same plan on every loop turn -- 100 identical rows in 10 ms, which
+        # is both useless as a record and a false picture of the live
+        # cadence. A rehearsal that fires faster than the real thing is not
+        # a rehearsal. Found by running it, 2026-09-05.
+        now = time.time()
+        self.last_trade_ts = now
+        for venue in (v, other):
+            if venue is not None:
+                venue.last_traded_ts = now
         log.warning("[SHADOW] %s %s %s %.6g @%.6g%s — NOT SENT",
                     action, v.name if v is not None else "-", side, qty, px,
                     f" | edge {edge_bps:.2f}bps" if edge_bps is not None else "")
@@ -1835,6 +1878,19 @@ class Engine:
                         f"[{v.name}] cannot fetch starting position: {e!r}")
                 # exchange unreachable (e.g. scheduled maintenance): pause
                 # trading and keep probing until it answers again
+                # Name the cause. Lighter sits behind CloudFront + AWS WAF:
+                # a burst answers 429, and then 405 with the header
+                # `x-amzn-waf-action: captcha` -- which is a CHALLENGE, not a
+                # broken route. Nothing here tries to answer it; the only
+                # correct response is to slow down, which the probe cadence
+                # below already does. Measured 2026-09-05.
+                why = str(e)
+                if "429" in why or "Too Many Requests" in why:
+                    why = "rate limited (429)"
+                elif "405" in why and "waf" in why.lower():
+                    why = "WAF captcha challenge — back off, do not retry hard"
+                elif "405" in why:
+                    why = "405 (CloudFront/WAF, usually a burst limit)"
                 n = self._venue_fetch_fails.get(v.key, 0) + 1
                 self._venue_fetch_fails[v.key] = n
                 self._venue_probe_at[v.key] = now + self.cfg.venue_probe_sec
@@ -1845,8 +1901,8 @@ class Engine:
                                  "it recovers", v.name, n,
                                  self.cfg.venue_probe_sec)
                 elif v.key not in self._venue_down:
-                    log.warning("[%s] position fetch failed (%d): %r",
-                                v.name, n, e)
+                    log.warning("[%s] position fetch failed (%d): %s",
+                                v.name, n, why)
                 return
             if v.key in self._venue_down:
                 log.warning("[%s] API recovered after %.0fs outage — "

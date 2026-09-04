@@ -131,3 +131,24 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name:52s} OK")
+
+
+def test_shadow_does_not_refire_faster_than_live():
+    """A rehearsal that fires faster than the real thing is not a rehearsal.
+
+    _scan refuses to act on a book older than the venue's own last trade,
+    which in live mode is what spaces executions out. Shadow has to stamp
+    the same clock or it re-decides the identical plan on every loop turn.
+    """
+    eng = shadow_engine(mode="taker")
+    eng.entropy.set_book(100.14, 100.16)
+    eng.hedge.set_book(99.99, 100.01)
+
+    async def go():
+        import time
+        eng._scan(time.time())                     # arms
+        for _ in range(20):                        # books do not move
+            await eng._evaluate()
+    run(go())
+    assert eng.shadow_decisions == 1, \
+        f"the same plan was decided {eng.shadow_decisions} times on one book"

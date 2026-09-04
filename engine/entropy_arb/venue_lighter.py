@@ -187,6 +187,7 @@ class LighterVenue:
         self.signer = None
         self.orders_feed: Optional[AccountOrdersFeed] = None
         self._coi = int(time.time() * 1000)
+        self._warm_fails = 0
 
     # ------------------------------------------------------------------ REST
 
@@ -247,7 +248,14 @@ class LighterVenue:
             LighterBookFeed(self.name, self.profile.ws_url, self.market_id,
                             self.book, notify).run(stop),
             name=f"book-{self.key}")]
-        if live:
+        if live and self.signer is None:
+            # Shadow mode reaches here: the strategy runs but no signer was
+            # built. The account stream needs one to authenticate, so
+            # starting it would only produce an endless reconnect loop
+            # against an error that cannot resolve itself.
+            log.info("[%s] no signer — account order stream not started "
+                     "(expected in shadow mode)", self.name)
+        elif live:
             self.orders_feed = AccountOrdersFeed(
                 self.name, self.profile.ws_url, self.market_id,
                 self.conf.lighter_creds.account_index, self.signer)
@@ -260,11 +268,28 @@ class LighterVenue:
 
     async def warm_http(self) -> None:
         """Keep the order-path HTTPS connections warm (a cold TLS handshake
-        adds 10-15ms to the first order after an idle spell)."""
+        adds 10-15ms to the first order after an idle spell).
+
+        Endpoint chosen by measurement, 2026-09-05: `/api/v1/status`,
+        `/blockHeight`, `/info` and `/layer2BasicInfo` all answer 403 from
+        CloudFront, so the ping this method used to send had NEVER once
+        succeeded -- and it said so at debug level, which is the same as not
+        saying it. `orderBookDetails` for our own market answers 200 in ~90ms
+        for 1.4 KB, which is the lightest thing that actually works.
+        """
         try:
-            await self._get("/api/v1/status")
+            await self._get("/api/v1/orderBookDetails",
+                            {"market_id": str(self.market_id)})
+            self._warm_fails = 0
         except Exception as e:
-            log.debug("[%s] keepalive ping failed: %r", self.name, e)
+            # A keepalive that always fails is a keepalive that does not
+            # exist. Silence here is how the previous one survived.
+            self._warm_fails = getattr(self, "_warm_fails", 0) + 1
+            if self._warm_fails in (5, 50) or self._warm_fails % 500 == 0:
+                log.warning("[%s] order-path keepalive has failed %d times "
+                            "in a row: %r — the first order after an idle "
+                            "spell will pay a cold TLS handshake",
+                            self.name, self._warm_fails, e)
         if self.signer is None:
             return
         try:

@@ -41,6 +41,11 @@
 > 兩個錄價器——那段時間的簿口會斷，**分鐘資料出現缺口是預期的，不是故障**。
 > 引擎的 `venue_down` + 探測回復本來就涵蓋這個情境。
 >
+> **🟢 系統第一次完整跑起來了（2026-09-05，`--shadow`）**：`config_NBIS_shadow.yaml`
+> ＋ `python tools/../main.py --shadow --symbol NBIS --hedge lighter`。行情通、
+> 兩個 ws 通、策略迴圈通、狀態行通、乾淨關機。**不需要 AWS、不需要資金、
+> 不需要簽章金鑰。** 跑出來的四個發現見下面「首跑發現」。
+>
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
 > （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
@@ -54,6 +59,41 @@
 
 **要接的交易所清單見 `research/arb/VENUES.md`**（三層：現在只讀行情的 10 個、
 $50 實盤要簽單的 4 個、之後才碰的）。
+
+## A0. Shadow 首跑發現（2026-09-05，四個都已修）
+
+跑起來才看得到的東西，四個都是真缺陷：
+
+1. **日誌檔用系統編碼寫，雙語訊息整條被丟掉。** `FileHandler(log_file)` 沒給
+   `encoding`，本機是 cp950 → 每一條含中文的 CRITICAL 都觸發
+   `UnicodeEncodeError`，logging 直接丟棄那筆紀錄。**這個引擎的每一條守衛
+   告警都是雙語的**，所以「守衛觸發了但日誌裡沒有」在實盤會發生。
+   已改 `encoding="utf-8"`，主控台也 reconfigure。
+2. **Lighter 的保活從來沒成功過。** `warm_http()` 打 `/api/v1/status`，
+   實測那個端點**一律 403**（`/blockHeight`、`/info`、`/layer2BasicInfo` 也是）。
+   失敗記在 `log.debug` 所以沒人看得見。改打
+   `orderBookDetails?market_id=<ours>`（200／~90ms／1.4KB），並在連續失敗
+   5、50、每 500 次時升級成 warning——**一直失敗的保活等於沒有保活**。
+3. **沒有 signer 時仍然啟動帳戶 ws**，於是無限重連一個永遠不會好的錯誤
+   （shadow 模式必然踩到）。改成沒有 signer 就不啟動並說明原因。
+4. **Shadow 的開火節奏比實盤快幾百倍**：`_blocked()` 沒有蓋
+   `venue.last_traded_ts`，所以 `_scan` 的「不對早於本場館上次成交的簿口再
+   開火」那道守衛從未生效——同一個決定 10 毫秒內重複上百次。
+   **比實盤快的排練不是排練。** 修完是 1 個決定 / 70 秒。
+
+**另外量到兩件事（不是缺陷）：**
+- Lighter 自己的 `orderBooks` 回報 **`taker_fee=0.0000`**——那條腿的 0 bps
+  是它自己說的，不是我們假設的。
+- **Lighter 的 REST 在 CloudFront + AWS WAF 後面**：連續查詢先回 429，
+  再回 405 並帶 `x-amzn-waf-action: captcha`。那是**挑戰不是壞路由**，
+  唯一正確的反應是退避。已讓日誌把原因說出名字。啟動時的市場載入也加了
+  五次退避重試——先前一次暫時性 405 就會讓引擎啟動失敗。
+
+**⚠ 一個要使用者決定的觀察**：跑的當下 NBIS 的溢價在 **−2 到 +12 bps** 之間，
+而設定檔的帶是 `midline 0 ± 4`。扣掉今天改正的 4.5 bps 吃單費之後仍有
+7 bps 淨值（`exp $0.0145` / $20 一筆）。但 `RISK_NUMBERS.md` §4.2 記過：
+NBIS 的 `premium_close` 中位是 −1.5 bps，而 `midline_bps` 填 0。
+**midline 填錯是會虧錢的**——實盤前重算一次。
 
 ## A. 卡在使用者身上（研究端做不了，做了也不算數）
 
