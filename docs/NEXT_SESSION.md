@@ -1,3 +1,25 @@
+> **給新 session 的第一句話（2026-09-04 晚）**：這條線現在是**自己的 repo**
+> （`Desktop/flowbot/arb`，GitHub `rfobelieve-crypto/flowbot-arb`，私有），
+> 使用者決定**套利用獨立 session、量化線用另一個**。先讀 `README.md`，再讀本檔。
+> flow_system 那邊只剩兩座唯讀顯示橋（`research/arb_home.py` 是唯一知道
+> 這裡在哪的檔案）——**本 repo 永不讀 flow_system、永不碰它的 MySQL**。
+>
+> **今天落地的判決**：SNDK 錄滿 7.03 天、過閘——但只在零費率假設下。
+> 實測帶 2.06 bps、收斂 98%（中位 6 分鐘）；費率表要求 13.5 bps → 扣費後
+> 每筆為負。判決文原話：「判準沒被改，是它的前提被推翻了。要救這條線只有
+> 兩條路：查證返佣，或改掛單執行。」其餘配對 09-06（NBIS/ANTH/BTC/ZEC/NEAR）
+> 到 09-10（GOLD/NVDA）到期，看 `results/arb_premium_verdict.json`。
+>
+> **下一步就是那兩條路**：我做 **B3 掛單路徑**（規格 `PEER_INFRA.md` §7，
+> 碰錢程式碼要 B1 級審查）→ 波動熔斷 → 把 `risk:` 數字填進設定檔（現在
+> 實盤會拒絕啟動，見 README）；使用者做 **M1**（`M1_CHECKLIST.md`）＋給各所
+> 邀請碼折扣數字。
+>
+> 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
+> 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
+> （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
+> 引擎測試 `cd engine && python -m pytest -q`（29 passed，anaconda 3.9）。
+
 # 未完成工作交接（2026-09-04 收工，給下一個 session）
 
 > 讀法：先讀本檔的「A 卡在人身上」——那幾件不做，B 的大部分做不下去。
