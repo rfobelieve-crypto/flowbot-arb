@@ -36,6 +36,11 @@
 > 引擎只會看到下單被拒。到期前要在 <https://app.hyperliquid.xyz/API> 重新
 > 產生並授權，然後換掉 `.env` 的 `HL_PRIVATE_KEY`。
 >
+> **📅 Lighter-RH 排程維護：2026-09-05 12:00 UTC，停機 <5 分鐘**（官網公告，
+> 09-04 讀到）。公告原話：維護期間**無法下單**。影響 `GOLD_LL` 與 `NVDA_LL`
+> 兩個錄價器——那段時間的簿口會斷，**分鐘資料出現缺口是預期的，不是故障**。
+> 引擎的 `venue_down` + 探測回復本來就涵蓋這個情境。
+>
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
 > （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
