@@ -16,6 +16,13 @@
 > `maker_fee_bps` 沒有依據，而沒有那個數字就不該把 `mode` 從 taker 改成
 > maker——掛單路徑存在的全部理由就是那個費率。之後才是 B6 面板。
 >
+> **⚠ 實盤前的硬條件（2026-09-04 晚查證）**：Lighter mainnet 帳號 `743078`
+> 目前餘額 **$18.89**，而 `config_NBIS.yaml` 的風控數字是照**每所 $50、1×
+> 槓桿**推的（`max_position_usd: 40`）。**在補到 $50 之前不要開實盤**——
+> $40 的部位上限配 $18.89 等於默許 2 倍槓桿，`LIVE_50U_SPEC` §0 的「1× 槓桿
+> → 清算風險消失」在那個餘額上不成立。使用者已表示後續會補到 $50。
+> 若決定就用小額，改法在 `docs/RISK_NUMBERS.md` §3：前五列隨帳戶大小線性縮放。
+>
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
 > （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
