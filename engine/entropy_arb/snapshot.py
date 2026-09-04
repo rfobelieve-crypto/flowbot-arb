@@ -16,6 +16,14 @@ not already a property of the engine, it does not belong here.
 **It is a sidecar.** A snapshot that fails is a log line, never an
 interruption -- `CLAUDE.md` §2: 旁路壞掉不影響交易.
 
+**One thing this cannot show, and it matters.** Shadow never accumulates a
+position, because accumulating one would mean simulating fills. So a shadow
+run answers "how often does an opportunity qualify" -- it does NOT answer
+"how many trades you would have done". A live engine stops at `cap_usd`
+after two clips and waits for the premium to revert; shadow keeps qualifying
+on every book update. Read shadow.csv as an opportunity census, never as a
+trade count.
+
 **Two files, not one** (`docs/DEPLOY.md` §三): the public half may contain
 only percentages, direction and time; dollars and position sizes live in the
 private half. Mixing them in one object is how the wrong half eventually
