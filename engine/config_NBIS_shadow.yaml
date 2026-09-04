@@ -68,6 +68,7 @@ risk:
   max_gross_usd: 100.0        # both legs at cap = $80; this is the typo backstop
   max_daily_loss_usd: 10.0     # 10% of the $100 deployed on this pair
   max_consecutive_stale: 20
+  max_stale_episodes: 5
   halt_flatten_attempts: 3
   max_edge_bps: 150.0         # measured premium reaches 94 bps; this is "the book is wrong"
   vol_window_sec: 60.0

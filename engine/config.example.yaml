@@ -201,6 +201,18 @@ risk:
   # quiet market look identical without this. 0 disables.
   # 连续 N 次盘口过期即停机——没有这条，行情安静和数据源死掉长得一样。
   max_consecutive_stale: 20
+  # What happens when that limit is reached depends on whether there is
+  # anything to protect. HOLDING something -> HALT (you cannot manage a
+  # position you cannot see). FLAT -> pause and recover by itself, because
+  # "stop trading" is already fully achieved by the per-evaluation freshness
+  # check and the extra halt only costs a restart. Measured 2026-09-05: a
+  # websocket dropped, the guard halted, the feed returned eight seconds
+  # later, and the engine sat halted for two hours with nothing at risk.
+  # This is the backstop for that leniency: a feed that dies this many times
+  # in ONE session is a systemic problem and halts even flat. 0 = never.
+  # 盘口过期达到上限时：有持仓 -> 停机；持仓为零 -> 暂停并自行恢复。
+  # 但同一场次死这么多次就是系统性问题，即使空仓也停机。
+  max_stale_episodes: 5
   # Self-rescue: consecutive reduce-only hedge attempts that make NO PROGRESS
   # before backing off to a slow retry. Any reduction in |net| resets it, so a
   # transient outage cannot exhaust it. The engine NEVER gives up permanently

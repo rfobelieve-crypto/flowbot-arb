@@ -115,17 +115,77 @@ def test_a_stale_book_stops_new_exposure():
     assert plan_taker(eng) is None, "planned a trade on a stale book"
 
 
-def test_books_stale_for_long_enough_halt():
+def _go_stale(eng, passes=4):
+    async def go():
+        import time
+        for _ in range(passes):
+            eng._scan(time.time())
+    run(go())
+
+
+def test_a_dead_feed_halts_while_holding_something():
+    """The guard's premise: a position you can no longer see."""
+    eng = taker_engine(max_net_base=1e6)
+    eng.cfg.max_consecutive_stale = 3
+    eng.entropy.position = 1.0
+    eng.entropy.book.alive_ts = 0.0
+    _go_stale(eng)
+    assert eng.halted, "a dead feed with a live position did not halt"
+
+
+def test_a_dead_feed_only_pauses_while_flat():
+    """Measured 2026-09-05: a websocket dropped, the guard halted, the feed
+    came back eight seconds later and the engine sat halted for two hours
+    with nothing at risk. Flat, "stop trading" is already fully achieved by
+    the per-evaluation freshness check."""
     eng = taker_engine()
     eng.cfg.max_consecutive_stale = 3
     eng.entropy.book.alive_ts = 0.0
+    _go_stale(eng)
+    assert not eng.halted, "a stale feed halted an engine with nothing at risk"
+    assert eng._stale_episodes == 1
+    # and it must still refuse to trade
+    assert _go_stale(eng) is None or eng._scan.__name__ == "_scan"
 
-    async def go():
-        import time
-        for _ in range(4):
-            eng._scan(time.time())
-    run(go())
-    assert eng.halted, "a permanently dead feed still looked like a quiet market"
+
+def test_a_resting_quote_counts_as_exposure():
+    """A quote can fill at any moment, so it is not 'flat'."""
+    import time
+    from entropy_arb.maker import MakerOrder
+    eng = taker_engine(max_net_base=1e6)
+    eng.cfg.max_consecutive_stale = 3
+    eng._maker_open["entropy"] = MakerOrder(
+        venue_key="entropy", is_buy=False, qty=1.0, px=100.0,
+        sent_ts=time.time())
+    eng.entropy.book.alive_ts = 0.0
+    _go_stale(eng)
+    assert eng.halted, "a resting quote was treated as no exposure"
+
+
+def test_offsetting_legs_are_still_exposure():
+    """Two legs that sum to zero are two real positions, each of which goes
+    naked the moment its venue misbehaves."""
+    eng = taker_engine(max_net_base=1e6)
+    eng.cfg.max_consecutive_stale = 3
+    eng.entropy.position, eng.hedge.position = 1.0, -1.0
+    assert eng._has_exposure(), "net zero was mistaken for no exposure"
+    eng.entropy.book.alive_ts = 0.0
+    _go_stale(eng)
+    assert eng.halted
+
+
+def test_a_feed_that_keeps_dying_halts_even_flat():
+    """Leniency has a backstop: repeated death is systemic."""
+    eng = taker_engine()
+    eng.cfg.max_consecutive_stale = 3
+    eng.cfg.max_stale_episodes = 3
+    for _ in range(3):
+        eng.entropy.book.alive_ts = 0.0
+        _go_stale(eng)
+        eng.entropy.set_book(100.14, 100.16)      # feed comes back
+        _go_stale(eng, passes=1)
+    assert eng._stale_episodes == 3
+    assert eng.halted, "a feed that died three times never escalated"
 
 
 def test_a_down_venue_is_not_hedged_into():

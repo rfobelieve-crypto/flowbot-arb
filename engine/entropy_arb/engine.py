@@ -93,6 +93,8 @@ class Engine:
         self.control = None
         self._recorder_dead: Optional[str] = None   # G5: sidecar liveness
         self._stale_streak = 0            # B4: consecutive stale evaluations
+        self._stale_episodes = 0          # how many times that limit was hit
+        self._stale_episode_open = False  # inside one episode right now
         # self-rescue state: consecutive flatten attempts that made NO
         # progress, the |net| they were measured against, and a slow-retry
         # tick used after the budget is exhausted.
@@ -569,15 +571,14 @@ class Engine:
                      and sell.book.is_fresh(cfg.staleness_sec))
             if fresh:
                 self._stale_streak = 0
+                self._stale_episode_open = False
             else:
                 self._stale_streak += 1
                 if (cfg.max_consecutive_stale
                         and self._stale_streak >= cfg.max_consecutive_stale):
-                    self._risk_halt(
-                        f"books stale {self._stale_streak} evaluations in a "
-                        f"row (> {cfg.staleness_sec:.0f}s each) — a dead feed "
-                        f"looks exactly like a quiet market")
-                    return None
+                    self._on_stale_limit()
+                    if self.halted:
+                        return None
             if not fresh:
                 continue
             if not (self._ready(buy) and self._ready(sell)):
@@ -801,14 +802,12 @@ class Engine:
                  and taker_v.book.is_fresh(cfg.staleness_sec))
         if fresh:
             self._stale_streak = 0
+            self._stale_episode_open = False
         else:
             self._stale_streak += 1
             if (cfg.max_consecutive_stale
                     and self._stale_streak >= cfg.max_consecutive_stale):
-                self._risk_halt(
-                    f"books stale {self._stale_streak} evaluations in a row "
-                    f"(> {cfg.staleness_sec:.0f}s each) — a dead feed looks "
-                    f"exactly like a quiet market")
+                self._on_stale_limit()
             return None
         if not (self._ready(maker_v) and self._ready(taker_v)):
             return None
@@ -1650,6 +1649,62 @@ class Engine:
             f"{edge_bps:.3f}" if edge_bps is not None else "",
             f"{exp_edge_usd:.4f}" if exp_edge_usd is not None else "", note])
         return True
+
+    def _has_exposure(self) -> bool:
+        """Anything on an exchange that could move against us.
+
+        PER VENUE, not net: two offsetting legs sum to zero and are still two
+        real positions, each of which becomes naked the moment its venue
+        misbehaves. A resting quote counts too -- it can fill at any moment.
+        """
+        if self._maker_open:
+            return True
+        tol = self.cfg.net_tolerance_base
+        return any(abs(v.position) > tol for v in self.venues.values())
+
+    def _on_stale_limit(self) -> None:
+        """The stale-book guard reached its limit. Halt, or pause?
+
+        Measured 2026-09-05, first long shadow run: Lighter's websocket died
+        (`1011 keepalive ping timeout`), the book went stale, the guard
+        halted -- and the feed came back EIGHT SECONDS LATER. The engine then
+        sat halted for two hours with a flat position, because HALT needs a
+        human.
+
+        The guard's premise is "a dead feed and a quiet market look
+        identical", and what makes that dangerous is holding a position you
+        can no longer see. With NOTHING held, "stop trading" is already fully
+        achieved by the per-evaluation freshness check; the extra HALT buys
+        no safety and costs a restart.
+
+        So: exposure -> HALT (unchanged). Flat -> pause and recover, but
+        COUNT it, and halt for real once a session has seen too many. A feed
+        that keeps dying is a systemic problem even when nothing is at risk.
+        """
+        cfg = self.cfg
+        if not self._stale_episode_open:
+            self._stale_episode_open = True
+            self._stale_episodes += 1
+        why = (f"books stale {self._stale_streak} evaluations in a row "
+               f"(> {cfg.staleness_sec:.0f}s each) — a dead feed looks "
+               f"exactly like a quiet market")
+        if self._has_exposure():
+            self._risk_halt(why + " — AND WE ARE HOLDING SOMETHING")
+            return
+        if (cfg.max_stale_episodes
+                and self._stale_episodes >= cfg.max_stale_episodes):
+            self._risk_halt(f"{why} — episode {self._stale_episodes} of this "
+                            f"session (limit {cfg.max_stale_episodes}). Flat "
+                            f"each time, but a feed that keeps dying is a "
+                            f"systemic problem")
+            return
+        if self._stale_streak == cfg.max_consecutive_stale:
+            log.critical(
+                "STALE BOOKS (episode %d/%s): %s. Position is FLAT, so this "
+                "PAUSES instead of halting — the freshness check already "
+                "stops every trade. Recovers by itself when a feed returns. "
+                "/ 盘口过期但持仓为零：暂停而非停机，行情恢复即自行恢复。",
+                self._stale_episodes, cfg.max_stale_episodes or "∞", why)
 
     def _risk_halt(self, reason: str) -> bool:
         """One place where every hard stop is raised. Constant cost, no I/O.

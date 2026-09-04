@@ -216,6 +216,13 @@ class Config:
     # reconciling fixes, so it halts (and still self-rescues). True unless
     # you deliberately share the account, which this project forbids anyway.
     unexplained_position_halt: bool
+    # Stale-book escalation (2026-09-05). max_consecutive_stale halts only
+    # when there is exposure to protect; when the engine is FLAT a stale feed
+    # pauses and recovers, because "stop trading" is already achieved by the
+    # per-evaluation freshness check. This is the backstop for that leniency:
+    # a feed that dies this many times in one session is a systemic problem,
+    # and the engine halts even flat. 0 = never escalate.
+    max_stale_episodes: int
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -306,6 +313,7 @@ _SCHEMA: Dict[str, Any] = {
         "vol_max_move_bps": float,    # ... peak-to-trough that trips it
         "vol_cooldown_sec": float,    # ... how long the pause lasts
         "unexplained_position_halt": bool,  # halt on a move we did not cause
+        "max_stale_episodes": int,    # flat + stale N times in a session -> halt
     },
     "execution": {
         "mode": str,                  # B3: taker | maker
@@ -495,6 +503,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     vol_cooldown_sec = float(_get(raw, "risk", "vol_cooldown_sec", 60.0))
     unexplained_position_halt = bool(_get(raw, "risk",
                                           "unexplained_position_halt", True))
+    max_stale_episodes = int(_get(raw, "risk", "max_stale_episodes", 5))
+    if max_stale_episodes < 0:
+        raise ConfigError("risk.max_stale_episodes must be >= 0 (0 disables)")
     if vol_max_move_bps < 0:
         raise ConfigError("risk.vol_max_move_bps must be >= 0 (0 disables)")
     if vol_max_move_bps and vol_window_sec <= 0:
@@ -601,6 +612,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         vol_max_move_bps=vol_max_move_bps,
         vol_cooldown_sec=vol_cooldown_sec,
         unexplained_position_halt=unexplained_position_halt,
+        max_stale_episodes=max_stale_episodes,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,
