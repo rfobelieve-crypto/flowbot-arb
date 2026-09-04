@@ -115,3 +115,7 @@ logging:
 # execution.net_tolerance_base；设 0 关闭（实盘不建议）。
 risk:
   max_net_base: 0.003
+  # Session mark-to-market floor in USD. The engine halts when session PnL
+  # drops below -this. 0 disables (not recommended live).
+  # 本次运行的 MTM 亏损下限（USD），超过即整机停止下单；0 关闭。
+  max_daily_loss_usd: 20.0

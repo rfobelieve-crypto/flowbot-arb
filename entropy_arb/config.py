@@ -150,6 +150,10 @@ class Config:
     # Declared without a default so it cannot be forgotten at a call site;
     # load_config always supplies it (default 3x net_tolerance_base).
     max_net_base: float
+    # B4 (2026-09-04): the session mark-to-market floor. The engine halts
+    # when session PnL drops below -this. Constant cost: session_pnl() is a
+    # sum over two venues, no I/O. 0 = disabled (not recommended once live).
+    max_daily_loss_usd: float
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -213,7 +217,8 @@ _SCHEMA: Dict[str, Any] = {
         "floor_frac": float,
     },
     "risk": {
-        "max_net_base": float,     # B4/G1: hard cap on |leg A + leg B|
+        "max_net_base": float,      # B4/G1: hard cap on |leg A + leg B|
+        "max_daily_loss_usd": float,  # B4: session MTM floor, halts on breach
     },
     "execution": {
         "premium_persist_sec": float,
@@ -330,6 +335,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
                                                "net_tolerance_base", 0.001))))
     if max_net_base < 0:
         raise ConfigError("risk.max_net_base must be >= 0 (0 disables)")
+    max_daily_loss_usd = float(_get(raw, "risk", "max_daily_loss_usd", 0.0))
+    if max_daily_loss_usd < 0:
+        raise ConfigError("risk.max_daily_loss_usd must be >= 0 (0 disables)")
 
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
@@ -410,6 +418,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
 
     return Config(
         max_net_base=max_net_base,
+        max_daily_loss_usd=max_daily_loss_usd,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,

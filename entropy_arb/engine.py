@@ -58,6 +58,7 @@ class Engine:
         self._venue_locks: Dict[str, asyncio.Lock] = {}
         self._exec_tasks: set = set()
         self.halted = False
+        self._recorder_dead: Optional[str] = None   # G5: sidecar liveness
         self.consec_errors = 0
         self.last_trade_ts = 0.0
         self.trades = 0
@@ -214,8 +215,16 @@ class Engine:
             self.recorder = MinuteRecorder(cfg.recorder_csv, self.entropy.book,
                                            self.hedge.book, cfg.staleness_sec,
                                            funding=funding)
-            tasks.append(asyncio.create_task(self.recorder.run(self.stop),
-                                             name="recorder"))
+            rec_task = asyncio.create_task(self.recorder.run(self.stop),
+                                           name="recorder")
+            # G5 (2026-09-04, principle 7): an asyncio task that dies of an
+            # unhandled exception does so SILENTLY -- the engine would keep
+            # trading while believing the recorder is still writing. That is
+            # this project's oldest disease (process alive, function dead).
+            # The callback does not stop trading: a sidecar failure must not
+            # take down the hot path. It only makes the death visible.
+            rec_task.add_done_callback(self._recorder_died)
+            tasks.append(rec_task)
         if not self.record_only:
             tasks.append(asyncio.create_task(self._strategy_loop(),
                                              name="strategy"))
@@ -537,6 +546,35 @@ class Engine:
             "exp": plan.exp_edge_usd, "fill": fill_edge, "status": status,
             "ok": ok})
 
+    def _recorder_died(self, task) -> None:
+        """G5: the recorder task finished. Cancellation at shutdown is
+        normal; anything else means the sidecar is gone and the operator
+        must know. Trading continues by design (principle 7)."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            if not self.stop.is_set():
+                self._recorder_dead = "exited without error"
+                log.critical("RECORDER STOPPED (no error) — trading continues "
+                             "but minute data is NO LONGER being written")
+            return
+        self._recorder_dead = repr(exc)
+        log.critical("RECORDER DIED: %r — trading continues but minute data "
+                     "is NO LONGER being written", exc)
+
+    def _risk_halt(self, reason: str) -> bool:
+        """One place where every hard stop is raised. Constant cost, no I/O.
+        Returns True if the engine is (now) halted."""
+        if self.halted:
+            return True
+        self.halted = True
+        log.critical("HALTED: %s — no further orders. Positions are "
+                     "untouched; flatten manually or restart after checking "
+                     "both venues.", reason)
+        self._reconcile_evt.set()
+        return True
+
     async def _maybe_hedge(self) -> None:
         net = sum(v.position for v in self.venues.values())
         # B4/G1 (2026-09-04): a hard ceiling on how far the legs may drift.
@@ -546,15 +584,20 @@ class Engine:
         # HALT is one-way: it needs a restart, and a restart re-reads the
         # real positions with strict=True.
         cap = self.cfg.max_net_base
-        if cap > 0 and abs(net) > cap and not self.halted:
-            self.halted = True
-            log.critical("HALTED: net imbalance %+.6g exceeds max_net_base "
-                         "%.6g — the legs are no longer hedging each other. "
-                         "No further orders. Positions are untouched; "
-                         "flatten manually or restart after checking both "
-                         "venues.", net, cap)
-            self._reconcile_evt.set()
+        if cap > 0 and abs(net) > cap:
+            self._risk_halt(f"net imbalance {net:+.6g} exceeds max_net_base "
+                            f"{cap:.6g} — the legs are no longer hedging "
+                            f"each other")
             return
+        # B4 daily loss floor: session mark-to-market against the baseline
+        # taken at first evaluation. O(1) over two venues, no I/O.
+        floor = self.cfg.max_daily_loss_usd
+        if floor > 0:
+            pnl = self.session_pnl()
+            if pnl is not None and pnl < -floor:
+                self._risk_halt(f"session PnL ${pnl:+.4f} below floor "
+                                f"-${floor:.2f}")
+                return
         if abs(net) > self.cfg.net_tolerance_base:
             await self._hedge(net)
 
@@ -786,6 +829,8 @@ class Engine:
             pnl = self.session_pnl()
             rec = (f" | rec {self.recorder.rows_written} rows"
                    if self.recorder else "")
+            if self._recorder_dead:
+                rec += f" *** RECORDER DEAD: {self._recorder_dead[:60]} ***"
             log.info("[status] %s | prem %s bps (band %+.2f..%+.2f) | pos %s "
                      "net %+.6g | trades %d hedges %d | MTM %s expEdge $%.4f "
                      "fillEdge $%.4f%s%s",
