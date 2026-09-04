@@ -284,3 +284,75 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name:52s} OK")
+
+
+# ------------------------------------------- liquidation / foreign trades
+
+def _reconcile(eng, v):
+    async def go():
+        await eng._reconcile_venue(v, strict=False)
+    run(go())
+
+
+def test_a_position_that_moved_without_us_halts():
+    """A liquidation leaves no message. What it does leave is a position that
+    moved while this engine sent nothing."""
+    import time
+    eng = make_engine(max_net_base=1e6)
+    eng.entropy.last_traded_ts = time.time() - 3600   # we have been idle
+    eng.entropy.position = 1.0
+    eng.entropy.chain_position = 0.0                  # it is simply gone
+    _reconcile(eng, eng.entropy)
+    assert eng.halted, "an unexplained position move did not halt the engine"
+    assert eng.unexplained_events == 1
+    approx(eng.entropy.position, 0.0)                 # truth is still adopted
+
+
+def test_our_own_late_fill_is_not_unexplained():
+    """An unresolved send returns filled_base 0.0, so the chain learns the
+    fill before we do. That delta IS ours and must not read as a liquidation."""
+    import time
+    eng = make_engine(max_net_base=1e6)
+    # past RECONCILE_GRACE_SEC (5s) so the read happens at all, but well
+    # inside the attribution window, so the delta is still ours
+    eng.entropy.last_traded_ts = time.time() - 8
+    eng.entropy.position = 0.0
+    eng.entropy.chain_position = 1.0
+    _reconcile(eng, eng.entropy)
+    assert not eng.halted and eng.unexplained_events == 0
+    approx(eng.entropy.position, 1.0)
+
+
+def test_a_resting_quote_explains_a_position_move():
+    """A maker order can fill at any moment; the fill may reach the chain
+    before our poll sees it."""
+    import time
+    from entropy_arb.maker import MakerOrder
+    eng = make_engine(max_net_base=1e6)
+    eng.entropy.last_traded_ts = time.time() - 3600
+    eng._maker_open["entropy"] = MakerOrder(
+        venue_key="entropy", is_buy=False, qty=1.0, px=100.19, sent_ts=time.time())
+    eng.entropy.chain_position = -1.0
+    _reconcile(eng, eng.entropy)
+    assert not eng.halted and eng.unexplained_events == 0
+
+
+def test_startup_read_is_never_unexplained():
+    """At startup there is no history to compare against."""
+    eng = make_engine(max_net_base=1e6)
+    eng.entropy.chain_position = 5.0
+
+    async def go():
+        await eng._reconcile_venue(eng.entropy, strict=True)
+    run(go())
+    assert not eng.halted and eng.unexplained_events == 0
+    approx(eng.entropy.position, 5.0)
+
+
+def test_dust_is_not_a_liquidation():
+    import time
+    eng = make_engine(max_net_base=1e6)
+    eng.entropy.last_traded_ts = time.time() - 3600
+    eng.entropy.chain_position = 0.0005        # below net_tolerance_base 0.001
+    _reconcile(eng, eng.entropy)
+    assert not eng.halted and eng.unexplained_events == 0

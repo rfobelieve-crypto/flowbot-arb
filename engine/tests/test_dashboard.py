@@ -2,6 +2,7 @@
 
 Run:  python3 -m pytest tests/  (or  python3 tests/test_dashboard.py)
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -55,7 +56,21 @@ def render(eng, lang="en") -> str:
     return console.export_text()
 
 
+def _ensure_loop():
+    # Python 3.9: asyncio.Event() in Engine.__init__ needs a current loop,
+    # and any asyncio.run() earlier in the SESSION (other test modules do
+    # plenty) leaves the main thread without one. Same accommodation as
+    # test_engine.make_engine; without it these tests pass alone and fail in
+    # a full run, which is the worst kind of flake.
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
 def make_engine():
+    _ensure_loop()
+    _ensure_loop()
     eng = Engine(make_cfg())
     eng.entropy = StubVenue("entropy", "ENTROPY")
     eng.hedge = StubVenue("hedge", "RH")
@@ -65,6 +80,7 @@ def make_engine():
 
 
 def test_renders_before_markets_resolve():
+    _ensure_loop()
     eng = Engine(make_cfg())
     out = render(eng)
     assert "resolving markets" in out
@@ -127,6 +143,7 @@ def test_zh_stop_summary():
 
 
 def test_renders_record_only_and_empty_books():
+    _ensure_loop()
     eng = Engine(make_cfg(), record_only=True)
     eng.entropy = StubVenue("entropy", "ENTROPY")
     eng.hedge = StubVenue("hedge", "MAIN")

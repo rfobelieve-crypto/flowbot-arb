@@ -209,6 +209,13 @@ class Config:
     vol_window_sec: float
     vol_max_move_bps: float
     vol_cooldown_sec: float
+    # Liquidation / foreign-trade detection (2026-09-04). A position that
+    # moved while we sent nothing is not ours to manage: it is a liquidation,
+    # an ADL, a manual trade on the same account, or a second bot. All four
+    # mean the engine's model of the position is wrong in a way no amount of
+    # reconciling fixes, so it halts (and still self-rescues). True unless
+    # you deliberately share the account, which this project forbids anyway.
+    unexplained_position_halt: bool
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -292,6 +299,7 @@ _SCHEMA: Dict[str, Any] = {
         "vol_window_sec": float,      # volatility breaker: measurement window
         "vol_max_move_bps": float,    # ... peak-to-trough that trips it
         "vol_cooldown_sec": float,    # ... how long the pause lasts
+        "unexplained_position_halt": bool,  # halt on a move we did not cause
     },
     "execution": {
         "mode": str,                  # B3: taker | maker
@@ -468,6 +476,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     vol_window_sec = float(_get(raw, "risk", "vol_window_sec", 30.0))
     vol_max_move_bps = float(_get(raw, "risk", "vol_max_move_bps", 0.0))
     vol_cooldown_sec = float(_get(raw, "risk", "vol_cooldown_sec", 60.0))
+    unexplained_position_halt = bool(_get(raw, "risk",
+                                          "unexplained_position_halt", True))
     if vol_max_move_bps < 0:
         raise ConfigError("risk.vol_max_move_bps must be >= 0 (0 disables)")
     if vol_max_move_bps and vol_window_sec <= 0:
@@ -573,6 +583,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         vol_window_sec=vol_window_sec,
         vol_max_move_bps=vol_max_move_bps,
         vol_cooldown_sec=vol_cooldown_sec,
+        unexplained_position_halt=unexplained_position_halt,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,

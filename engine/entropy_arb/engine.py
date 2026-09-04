@@ -88,6 +88,7 @@ class Engine:
         self._halt_stuck_logged = False
         self._halt_ticks = 0
         self._absurd_skips = 0            # edges refused as too-good-to-be-true
+        self.unexplained_events = 0       # position moves we did not cause
         # Volatility breaker: the only switch here that lifts itself. It
         # stops NEW exposure while a book is moving too fast and leaves
         # hedging, flattening and reconcile alone.
@@ -1752,6 +1753,29 @@ class Engine:
                 self._update_evt.set()
             self._venue_fetch_fails[v.key] = 0
             delta = r - v.position
+            # --------------------------------------------------- liquidation
+            # A liquidation leaves no message. Neither does an ADL, a manual
+            # trade on the same account, or a second bot. What all four DO
+            # leave is a position that moved while this engine sent nothing --
+            # and the engine knows exactly when it last sent something, so
+            # "we did not cause this" is a fact here, not an inference.
+            #
+            # Reconcile still adopts the chain (truth is truth); the halt is
+            # about what happens NEXT. Carrying on would mean sizing, hedging
+            # and risk-capping against a position somebody else is also
+            # moving. HALT still self-rescues, so the exposure gets flattened.
+            if (self.cfg.unexplained_position_halt
+                    and not strict
+                    and abs(delta) > self.cfg.net_tolerance_base
+                    and not self._we_touched(v, now)):
+                self.unexplained_events += 1
+                self._risk_halt(
+                    f"[{v.name}] position moved {delta:+.6g} with no order "
+                    f"from us in {now - v.last_traded_ts:.0f}s — liquidation, "
+                    f"ADL, or someone else trading this account. Whatever it "
+                    f"was, the position is no longer only ours to manage / "
+                    f"持仓在我们没下单的情况下变动，可能是强平/自动减仓/"
+                    f"帐户被别人动过")
             if abs(delta) > 1e-12:
                 if abs(delta) > self.cfg.net_tolerance_base:
                     log.warning("[%s] reconcile: chain %+.6g vs local %+.6g "
@@ -1774,6 +1798,23 @@ class Engine:
                                 order.describe())
                     order.mark_applied(order.unapplied)
                     order.mark_hedged(order.unhedged)
+
+    # How long after our own order a position change is still attributable to
+    # it. The order may settle late (an unresolved send returns filled_base 0
+    # and the chain learns the truth first), so this must cover a full settle
+    # plus the reconcile that chases it.
+    def _attribution_window(self) -> float:
+        return self.cfg.settle_timeout_sec + self.cfg.reconcile_sec + 5.0
+
+    def _we_touched(self, v, now: float) -> bool:
+        """True when a position change on this venue could plausibly be ours."""
+        if v.key in self._maker_open:
+            return True          # a resting quote can fill at any moment
+        # No lock check here: the only caller already HOLDS this venue's
+        # lock, so "is an order in flight" would always answer yes. It is
+        # also unnecessary -- an in-flight order holds the lock, which is
+        # exactly what keeps reconcile out of this venue in the first place.
+        return now - v.last_traded_ts <= self._attribution_window()
 
     async def _reconcile_loop(self) -> None:
         while not self.stop.is_set():
@@ -1891,6 +1932,9 @@ class Engine:
                         f" ({self.vol.reason}) ***")
             elif self.vol.trips:
                 rec += f" | vol trips {self.vol.trips}"
+            if self.unexplained_events:
+                rec += (f" | *** UNEXPLAINED POSITION MOVES "
+                        f"x{self.unexplained_events} ***")
             if self._absurd_skips:
                 rec += f" | refused x{self._absurd_skips}"
             if self._stale_streak:
