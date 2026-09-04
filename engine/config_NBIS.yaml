@@ -4,7 +4,17 @@ entropy:
   dex: io
   max_orders_per_min: 120
   max_position_usd: 40
-  taker_fee_bps: 0.0
+  # 2026-09-04: measured, not assumed. HL info `userFees` for our own account
+  # returns userCrossRate 0.00045 / userAddRate 0.00015 -> 4.5 / 1.5 bps, with
+  # activeReferralDiscount and activeStakingDiscount both 0.0. The 0.0 that
+  # used to sit here was the assumption the SNDK verdict overturned.
+  # io's `feeRecipient` is currently null (xyz's is not), so the dex looks to
+  # be charging the base rate only -- but a HIP-3 builder CAN add a fee on
+  # top, so M1's receipt is still what settles this.
+  # 实测值：HL 的 userFees 端点对本帐户返回 4.5/1.5 bps，无返佣无质押折扣。
+  # 原来的 0.0 正是 SNDK 判决推翻的那个假设。
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5
 execution:
   cooldown_sec: 0.0
   hedge_slippage_bps: 20.0

@@ -132,11 +132,27 @@
 
 ## 4 還沒做、而且不該由這份文件代做的
 
-1. **`mode` 仍然是 `taker`。** SNDK 的判決說扣費後每筆為負，所以實盤唯一
-   說得通的是掛單——但掛單的經濟性取決於 `maker_fee_bps`，而那個數字
-   **要等 M1 的成交回執**（`NEXT_SESSION.md` A1）。目前 `maker_fee_bps`
-   預設等於 `taker_fee_bps`，也就是設定檔裡那個**同樣還沒對過帳單**的 0.0。
-   **先拿回執，再改 mode。** 沒對過帳單的費率不是折扣，是猜測。
+1. **`mode` 仍然是 `taker`，但 HL 那條腿的費率已經不是猜的了。**
+   2026-09-04 晚查 HL 的 `userFees` 端點（本帳戶、公開查詢）：
+
+   ```
+   userCrossRate  0.00045  ->  4.5 bps（吃單）
+   userAddRate    0.00015  ->  1.5 bps（掛單）
+   activeReferralDiscount 0.0    activeStakingDiscount 0.0
+   ```
+
+   **`config_NBIS.yaml` 原本寫 `taker_fee_bps: 0.0`——那正是 SNDK 判決
+   推翻的那個假設**，已改成 4.5 / 1.5。往上改是安全方向：低估費率才會讓
+   賠錢的配對在紙上看起來賺錢。
+
+   **這也是掛單路徑的經濟依據第一次有數字**：同一條腿吃單 4.5 vs 掛單 1.5，
+   **每腿省 3 bps**。判決文說「要救這條線只有兩條路：查證返佣，或改掛單
+   執行」——返佣這條現在查到是 **0**（兩個折扣欄位都是 0.0），所以剩下的
+   就是掛單。
+
+   **仍然要等 M1 才改 `mode`**：HIP-3 builder 可以在基礎費率上再加一層
+   （`io` 的 `feeRecipient` 目前是 null、`xyz` 的不是，所以 io 看起來只收
+   基礎費率——但「看起來」不是回執）。Lighter 那條腿的 0/0 也還沒對過帳單。
 2. **`thresholds:` 沒動。** 那是使用者從錄製資料自己導的訊號，不是風控。
    （順帶記一筆給下次看：NBIS 的 `premium_close` 中位是 −1.5 bps 而
    `midline_bps` 填 0；NVDA_LL 的中位是 −3.2 bps 而 `midline_bps` 也填 0。
