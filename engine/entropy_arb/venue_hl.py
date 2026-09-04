@@ -469,8 +469,22 @@ class HLVenue:
                 req["dex"] = self.conf.hl_dex
             orders = await self._info(req)
         except Exception as e:
-            log.warning("[%s] could not list open orders: %r", self.name, e)
-            return 0
+            # B3 audit S6.4 (2026-09-04): this used to log a warning and
+            # return 0, which reads as "no resting orders" -- the one
+            # conclusion the failure does not support. The Lighter side
+            # already refused to start here; the asymmetry existed only
+            # because `openOrders` with a `dex` parameter was unverified on
+            # HIP-3. Both sides now refuse: you may not trade beside orders
+            # you cannot enumerate.
+            raise RuntimeError(
+                f"[{self.name}] cannot list open orders ({e!r}) — refusing to "
+                f"trade without knowing what is already resting / 无法列出挂单，"
+                f"拒绝在不掌握的挂单旁边交易")
+        if orders is None:
+            raise RuntimeError(
+                f"[{self.name}] openOrders returned nothing for dex "
+                f"{self.conf.hl_dex!r} — cannot tell 'no orders' from "
+                f"'unsupported query'")
         oids = [int(o["oid"]) for o in (orders or [])
                 if o.get("coin") == self.coin and o.get("oid") is not None]
         if not oids:
