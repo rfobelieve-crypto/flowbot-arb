@@ -29,6 +29,7 @@ from .book import (ArbPlan, MakerPlan, floor_step, maker_edge_bps, plan_arb,
                    plan_maker)
 from .config import Config
 from .maker import MakerOrder
+from .metrics import LatencyBook
 from .recorder import MinuteRecorder
 from .volatility import VolatilityBreaker
 from .venue_hl import HLVenue
@@ -101,6 +102,11 @@ class Engine:
         self._halt_ticks = 0
         self._absurd_skips = 0            # edges refused as too-good-to-be-true
         self.unexplained_events = 0       # position moves we did not cause
+        # Round-trip latency, kept as percentiles. The one that matters for
+        # this strategy is `cancel`: pulling a quote before it is picked off
+        # IS the adverse-selection cost (M3), and an average hides the tail
+        # that does the damage.
+        self.lat = LatencyBook()
         # Volatility breaker: the only switch here that lifts itself. It
         # stops NEW exposure while a book is moving too fast and leaves
         # hedging, flattening and reconcile alone.
@@ -628,10 +634,12 @@ class Engine:
             return False
         self._record_send(buy)
         self._record_send(sell)
+        _t0 = time.time()
         res = await asyncio.gather(
             buy.send_taker(is_buy=True, qty=plan.qty, limit_px=buy_bound),
             sell.send_taker(is_buy=False, qty=plan.qty, limit_px=sell_bound),
             return_exceptions=True)
+        self.lat.add("arb", (time.time() - _t0) * 1e3)
         binfo, sinfo = (r if isinstance(r, dict) else
                         {"status": "send-failed", "filled_base": 0.0,
                          "avg_px": None, "err": repr(r), "unresolved": False}
@@ -883,12 +891,14 @@ class Engine:
                          exp_edge_usd=plan.exp_edge_usd, note=dkey):
             order.apply("canceled")     # nothing rested; retire it cleanly
             return
+        _t0 = time.time()
         try:
             async with self._vlock(maker_v.key):
                 self._record_send(maker_v)
                 res = await maker_v.send_maker(is_buy=order.is_buy,
                                                qty=plan.qty,
                                                limit_px=plan.maker_px)
+            self.lat.add("quote", (time.time() - _t0) * 1e3)
         except asyncio.CancelledError:
             raise
         except Exception as e:                                  # noqa: BLE001
@@ -1059,9 +1069,11 @@ class Engine:
         # Counts toward the venue's send budget but is never blocked by it:
         # an engine that cannot cancel is an engine that cannot stop.
         self._record_send(maker_v)
+        _t0 = time.time()
         try:
             async with self._vlock(maker_v.key):
                 res = await maker_v.cancel_order(order.handle)
+            self.lat.add("cancel", (time.time() - _t0) * 1e3)
         except asyncio.CancelledError:
             raise
         except Exception as e:                                  # noqa: BLE001
@@ -1200,6 +1212,7 @@ class Engine:
             info = {"status": "send-failed", "filled_base": 0.0,
                     "avg_px": None, "err": repr(e), "unresolved": True}
         order.stats["hedge_ms"] = (time.time() - t0) * 1e3
+        self.lat.add("quote-hedge", order.stats["hedge_ms"])
         fill = float(info.get("filled_base") or 0.0)
         if fill:
             px = info.get("avg_px") or limit
@@ -1373,6 +1386,7 @@ class Engine:
             self.describe_positions(),
             f"MTM {'$%+.4f' % pnl if pnl is not None else '—'} | "
             f"trades {self.trades} hedges {self.hedges}",
+            "lat p50/p95/p99 " + (self.lat.line() or "—"),
         ]
         state = []
         if self.halted:
@@ -1749,8 +1763,10 @@ class Engine:
                             net, "SELL" if is_sell else "BUY", qty, v.name, limit)
                 self.hedges += 1
                 self._record_send(v)  # counts toward the budget, never blocked
+                _t0 = time.time()
                 info = await v.send_taker(is_buy=not is_sell, qty=qty,
                                           limit_px=limit, reduce_only=True)
+                self.lat.add("hedge", (time.time() - _t0) * 1e3)
                 if info.get("err") or info.get("unresolved"):
                     log.error("[HEDGE] %s: %s", v.name,
                               info.get("err") or "unresolved")
@@ -2018,6 +2034,9 @@ class Engine:
                         f" ({self.vol.reason}) ***")
             elif self.vol.trips:
                 rec += f" | vol trips {self.vol.trips}"
+            lat = self.lat.line()
+            if lat:
+                rec += f" | lat p50/p95/p99 {lat}"
             if self.unexplained_events:
                 rec += (f" | *** UNEXPLAINED POSITION MOVES "
                         f"x{self.unexplained_events} ***")
