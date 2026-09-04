@@ -19,7 +19,7 @@
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
 > （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
-> 引擎測試 `cd engine && python -m pytest -q`（29 passed，anaconda 3.9）。
+> 引擎測試 `cd engine && python -m pytest -q`（**84 passed**，anaconda 3.9）。
 
 # 未完成工作交接（2026-09-04 收工，給下一個 session）
 
