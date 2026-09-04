@@ -101,14 +101,16 @@
 | 別人的基礎設施對照 | `docs/PEER_INFRA.md` |
 | 熱路徑稽核 | `docs/HOTPATH_AUDIT.md` |
 | 場館三層清單 | `docs/VENUES.md` |
+| 部署架構（AWS 引擎 / Vercel 儀表板） | `docs/DEPLOY.md` |
 | 成本名冊（七桶） | `docs/COST_INVENTORY.md` |
 | 憑證檢查（不印密鑰） | `engine/tools/check_env.py --root` |
 
 ## 7. 現在還開著的（2026-09-04 晚）
 
 **卡在使用者：**
-- **東京 VPS 與其上的部署**——完全不存在（A4）。現在的運維是 Windows 開機
+- **AWS 東京主機與其上的部署**——完全不存在（A4）。現在的運維是 Windows 開機
   資料夾 + `.bat` + PowerShell 看門狗，那是**錄價器**的規格，不是實盤引擎的。
+  架構已定（`docs/DEPLOY.md`：引擎 AWS 東京、儀表板 Vercel、資料單向出站）。
 - **兩邊資金補到 $50**——Lighter $18.89、HL $11.87（且 HL 的錢還在 spot，
   io dex 清算所是 $0）。現在的風控數字是照 $50 推的。
 - **M1 成交回執**——沒有它就沒有 `maker_fee_bps` 的依據，`mode` 不能改 maker。
