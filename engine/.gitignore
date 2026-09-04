@@ -1,5 +1,11 @@
 # secrets & local config / 密钥与本地配置
-.env
+# .env* rather than .env: Notepad silently saves ".env" as ".env.txt", and a
+# credential file that misses the ignore rule by three characters is a
+# credential file in a public commit.
+# 用 .env* 而不是 .env：记事本会把 ".env" 存成 ".env.txt"，差三个字符就等于
+# 把密钥提交上去。
+.env*
+!.env.example
 config.yaml
 
 # runtime output / 运行时输出
