@@ -44,7 +44,7 @@
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
 > （PowerShell 目錄列表的 mtime 對長期開著的檔案會延遲，不準）。
-> 引擎測試 `cd engine && python -m pytest -q`（**84 passed**，anaconda 3.9）。
+> 引擎測試 `cd engine && python -m pytest -q`（**116 passed**，anaconda 3.9）。
 
 # 未完成工作交接（2026-09-04 收工，給下一個 session）
 
@@ -150,6 +150,21 @@ G3 沒有 maker 路徑、G4 兩條 Lighter 鏈共用憑證。
 strict 重讀真實部位）。`flat` 先對帳核實真實持倉再平——這是 mistake.md
 2026-06-07 那道 GET heal 疤的直接對策，測試斷言它平掉的是鏈上的數字而不是
 本地相信的數字。CRITICAL 日誌轉發到同一個通道。
+
+### B8 ✅ 完成（2026-09-04）——掃描器兩個儀器缺陷
+同場館配對（缺 `va != vb` 守衛，`GOLD@bitget-bitget` 這種）與黃金三個發行商
+被併成一個資產（`XAU`/`XAUT`/`PAXG` 全部 → `GOLD`，量到的是託管方基差）。
+拆成 `GOLD_IDX`/`GOLD_XAUT`/`GOLD_PAXG`；配對規則抽成 `pair_up()` 才測得了。
+**掃描排名的分子先前被污染過，重跑一次才知道差多少。**
+
+### B11 ✅ 完成（2026-09-04）——上線前的三件基礎設施
+- **`--shadow`**：策略全跑、一張單都不送，決定寫進 `shadow.csv`。
+  `--record-only` 與真錢之間原本是懸崖。**不是 paper mode**：不模擬成交、
+  不虛構部位、不宣稱損益（測試直接斷言 position/cash/trades 為 0）。
+- **故障注入**（`tests/test_fault_injection.py`，12 案例）：未決、逾時、拒單、
+  限流、簿口過期、feed 死掉、場館 down、adapter 拋例外、對沖失敗、差額超上限。
+- **P99 延遲**（`entropy_arb/metrics.py`）：撤單來回就是逆選擇成本（M3）。
+  平均 80 ms 而 p99 3 秒的系統，是每百張報價賠一次而儀表板全綠。
 
 ### B6 `arb_live_*` 表 → `/public/arb-live` → jarvis 儀表板
 **唯讀、一顆按鈕都沒有**。引擎有資料之後才做，避免空殼。公開面規則照舊
