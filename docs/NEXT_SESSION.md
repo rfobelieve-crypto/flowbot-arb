@@ -21,7 +21,15 @@
 > 槓桿**推的（`max_position_usd: 40`）。**在補到 $50 之前不要開實盤**——
 > $40 的部位上限配 $18.89 等於默許 2 倍槓桿，`LIVE_50U_SPEC` §0 的「1× 槓桿
 > → 清算風險消失」在那個餘額上不成立。使用者已表示後續會補到 $50。
+> **HL 這邊還多一層**：2026-09-04 查證時 $11.87 **全部在 spot 帳戶**，
+> 而 perp（core）與 **io dex 的清算所都是 $0**——HIP-3 dex 各有各的清算所，
+> 錢要 spot → perp → io 轉兩次才動得了。沒轉之前引擎連單都下不出去。
 > 若決定就用小額，改法在 `docs/RISK_NUMBERS.md` §3：前五列隨帳戶大小線性縮放。
+>
+> **⏰ HL agent wallet 到期日：2026-12-03 13:27 UTC**（90 天，鏈上
+> `extraAgents` 的 `validUntil`）。到期後簽單直接失效，而且**不會有預警**——
+> 引擎只會看到下單被拒。到期前要在 <https://app.hyperliquid.xyz/API> 重新
+> 產生並授權，然後換掉 `.env` 的 `HL_PRIVATE_KEY`。
 >
 > 運維：10 個成員用 `--record-only` 跑在 `engine/`，看門狗 `EntropyArbWatchdog`
 > 每 5 分鐘；判斷活著看 `engine/logs/*/minutes.csv` 的 `os.stat` mtime
