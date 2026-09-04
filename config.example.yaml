@@ -127,7 +127,12 @@ risk:
   # quiet market look identical without this. 0 disables.
   # 连续 N 次盘口过期即停机——没有这条，行情安静和数据源死掉长得一样。
   max_consecutive_stale: 20
-  # Reduce-only hedges still allowed AFTER a halt, to flatten an imbalance
-  # that already exists. 0 = freeze (leaves naked exposure).
-  # 停机后仍允许的 reduce-only 对冲次数，用来平掉已经存在的裸露；0 = 冻结。
+  # Self-rescue: consecutive reduce-only hedge attempts that make NO PROGRESS
+  # before backing off to a slow retry. Any reduction in |net| resets it, so a
+  # transient outage cannot exhaust it. The engine NEVER gives up permanently
+  # -- after the budget it retries every 20 reconcile cycles. 0 = freeze
+  # (leaves naked exposure; opt in only if you will flatten by hand).
+  # 自救：连续「毫无进展」的 reduce-only 对冲次数上限；|net| 只要变小就重置，
+  # 所以短暂断线不会耗尽它。用完之后改为每 20 个对帐周期重试一次，永不永久放弃。
+  # 设 0 = 冻结（留下裸露，除非你会手动平仓否则不要设）。
   halt_flatten_attempts: 3

@@ -60,7 +60,13 @@ class Engine:
         self.halted = False
         self._recorder_dead: Optional[str] = None   # G5: sidecar liveness
         self._stale_streak = 0            # B4: consecutive stale evaluations
-        self._halt_flattens = 0           # B4: reduce-only hedges since halt
+        # self-rescue state: consecutive flatten attempts that made NO
+        # progress, the |net| they were measured against, and a slow-retry
+        # tick used after the budget is exhausted.
+        self._halt_flattens = 0
+        self._halt_last_net: Optional[float] = None
+        self._halt_stuck_logged = False
+        self._halt_ticks = 0
         self.consec_errors = 0
         self.last_trade_ts = 0.0
         self.trades = 0
@@ -601,6 +607,60 @@ class Engine:
                 g += abs(v.position) * m
         return g
 
+    # After the budget is spent, keep retrying this many reconcile cycles
+    # apart. At the default reconcile_sec=15 that is once every ~5 minutes --
+    # slow enough not to burn the order budget, persistent enough that a
+    # venue which comes back an hour later still gets flattened.
+    HALT_SLOW_RETRY_TICKS = 20
+
+    async def _self_rescue(self, net: float) -> None:
+        """Bring the position back to flat AFTER a halt, without a human.
+
+        A halt stops new arbitrage; it must not stop the engine from
+        unwinding exposure it already has. The budget below counts attempts
+        that made NO PROGRESS -- any reduction in |net| resets it -- so a
+        transient outage cannot exhaust it, and a genuinely stuck position
+        degrades to a slow retry instead of silence.
+        """
+        cfg = self.cfg
+        if abs(net) <= cfg.net_tolerance_base:
+            if self._halt_last_net is not None:
+                log.critical("SELF-RESCUE COMPLETE: net %+.6g within "
+                             "tolerance after %d attempt(s) — exposure "
+                             "unwound without intervention", net,
+                             self._halt_flattens)
+                self._halt_last_net = None
+                self._halt_flattens = 0
+                self._halt_stuck_logged = False
+            return
+        if not cfg.halt_flatten_attempts:
+            return                                    # freeze mode, opted in
+        # progress since the last attempt resets the budget
+        prev = self._halt_last_net
+        if prev is not None and abs(net) < abs(prev) - 1e-12:
+            self._halt_flattens = 0
+            self._halt_stuck_logged = False
+        self._halt_last_net = net
+        if self._halt_flattens < cfg.halt_flatten_attempts:
+            self._halt_flattens += 1
+            log.warning("[SELF-RESCUE %d/%d] reducing naked %+.6g",
+                        self._halt_flattens, cfg.halt_flatten_attempts, net)
+            await self._hedge(net)
+            return
+        # budget spent with no progress: slow down, never stop
+        if not self._halt_stuck_logged:
+            log.critical("SELF-RESCUE STUCK: %d attempts made no progress on "
+                         "net %+.6g (venue down, book stale, or below the "
+                         "minimum size). Still retrying every %d reconcile "
+                         "cycles — the engine does not give up.",
+                         self._halt_flattens, net, self.HALT_SLOW_RETRY_TICKS)
+            self._halt_stuck_logged = True
+        self._halt_ticks += 1
+        if self._halt_ticks >= self.HALT_SLOW_RETRY_TICKS:
+            self._halt_ticks = 0
+            log.warning("[SELF-RESCUE retry] net %+.6g", net)
+            await self._hedge(net)
+
     async def _maybe_hedge(self) -> None:
         net = sum(v.position for v in self.venues.values())
         # After a halt: do NOT open anything new (blocked in _evaluate /
@@ -609,13 +669,7 @@ class Engine:
         # back together leaves naked exposure through exactly the move that
         # caused the halt. Bounded so a failing hedge cannot loop.
         if self.halted:
-            if (abs(net) > self.cfg.net_tolerance_base
-                    and self._halt_flattens < self.cfg.halt_flatten_attempts):
-                self._halt_flattens += 1
-                log.warning("[HALT-FLATTEN %d/%d] reducing naked %+.6g",
-                            self._halt_flattens,
-                            self.cfg.halt_flatten_attempts, net)
-                await self._hedge(net)
+            await self._self_rescue(net)
             return
         # B4/G1 (2026-09-04): a hard ceiling on how far the legs may drift.
         # Checked BEFORE hedging, because the failure mode is "hedge keeps
@@ -878,9 +932,11 @@ class Engine:
                    if self.recorder else "")
             if self._stale_streak:
                 rec += f" | stale x{self._stale_streak}"
-            if self.halted and self.cfg.halt_flatten_attempts:
-                rec += (f" | flatten {self._halt_flattens}/"
-                        f"{self.cfg.halt_flatten_attempts}")
+            if self.halted and self._halt_last_net is not None:
+                rec += (f" | RESCUING net {self._halt_last_net:+.6g} "
+                        f"({self._halt_flattens}/"
+                        f"{self.cfg.halt_flatten_attempts}"
+                        + (" STUCK" if self._halt_stuck_logged else "") + ")")
             if self._recorder_dead:
                 rec += f" *** RECORDER DEAD: {self._recorder_dead[:60]} ***"
             log.info("[status] %s | prem %s bps (band %+.2f..%+.2f) | pos %s "
