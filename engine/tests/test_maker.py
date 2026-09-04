@@ -111,7 +111,10 @@ class FakeVenue:
         self.sent_takers.append((is_buy, qty, limit_px))
         if self.taker_result is not None:
             return dict(self.taker_result)
-        return {"status": "filled", "filled_base": qty, "avg_px": limit_px,
+        # a real IOC fills at the BOOK, not at the slippage bound we sent
+        top = self.book.best_ask() if is_buy else self.book.best_bid()
+        return {"status": "filled", "filled_base": qty,
+                "avg_px": top if top else limit_px,
                 "err": None, "unresolved": False}
 
     async def cancel_open_orders(self):
@@ -133,6 +136,9 @@ def make_cfg(**over):
         "vol_cooldown_sec": 60.0,
     }
     body.update(over)
+    # never write execution logs into the repo's own logs/ directory: the
+    # recorders live there and a test run must not leave rows in them
+    body["logdir"] = tempfile.mkdtemp(prefix="arb-test-").replace("\\", "/")
     f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
     f.write(f"""
 thresholds:
@@ -150,6 +156,9 @@ execution:
 sizing:
   min_order_notional_usd: 1.0
   max_order_notional_usd: 500.0
+logging:
+  trades_csv: {body['logdir']}/trades.csv
+  maker_csv: {body['logdir']}/maker.csv
 risk:
   max_net_base: {body['max_net_base']}
   vol_window_sec: {body['vol_window_sec']}

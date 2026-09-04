@@ -5,7 +5,7 @@ entropy:
   venue: lighter
   symbol: NVDA
   max_orders_per_min: 120
-  max_position_usd: 1000
+  max_position_usd: 40
   taker_fee_bps: 0.0
 execution:
   cooldown_sec: 0.0
@@ -22,7 +22,7 @@ execution:
   venue_probe_sec: 30.0
 hedge:
   max_orders_per_min: 30
-  max_position_usd: 1000
+  max_position_usd: 40
   taker_fee_bps: 0.0
   symbol: NVDA
 inventory:
@@ -38,10 +38,24 @@ recorder:
   csv: logs/NVDA_LL/minutes.csv
   enabled: true
 sizing:
-  max_order_notional_usd: 500
+  max_order_notional_usd: 20
   min_order_notional_usd: 10
   take_fraction: 0.5
 thresholds:
   lower_bps: 4.0
   midline_bps: 0.0
   upper_bps: 4.0
+risk:
+  # ARMED 2026-09-04 for the $50/venue live week (LIVE_50U_SPEC).
+  # Derivation and the measured inputs: docs/RISK_NUMBERS.md.
+  # 本区块的数值来自 docs/RISK_NUMBERS.md，与「每所 $50」这个决定绑定；
+  # 改变每所放多少钱，这里每一个数字都要重算。
+  max_net_base: 0.02          # ~$4.6 at 231 — a broken leg halts, dust does not
+  max_gross_usd: 100.0        # both legs at cap = $80; this is the typo backstop
+  max_daily_loss_usd: 10.0     # 10% of the $100 deployed on this pair
+  max_consecutive_stale: 20
+  halt_flatten_attempts: 3
+  max_edge_bps: 60.0         # measured premium reaches 19 bps; this is "the book is wrong"
+  vol_window_sec: 60.0
+  vol_max_move_bps: 18.0       # measured |1-min move| p99 = 11 bps, scaled for range
+  vol_cooldown_sec: 60.0
