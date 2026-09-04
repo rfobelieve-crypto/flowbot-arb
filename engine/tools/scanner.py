@@ -93,11 +93,20 @@ LAST_GOOD: dict = {}  # venue -> universe; a failed fetch reuses it (see below)
 # here manufactures a permanent fake spread.  ETF-vs-index look-alikes
 # (SPY/SP500, QQQ/XYZ100, USO/CL, SLV/SILVER) are NOT aliased — different
 # units and different carry; the scale guard would drop them anyway.
-# XAUT/PAXG are tokenised gold: they track spot gold but carry their own token
-# basis, so pairing them with GOLD is a HYPOTHESIS for the convergence gate to
-# test, not an identity. Same reasoning that keeps SPY/SP500 unaliased.
-CANON = {"OPENAI": "OAI", "ANTHROPIC": "ANTH", "XAU": "GOLD", "XAG": "SILVER",
-         "XAUT": "GOLD", "PAXG": "GOLD"}
+# B8 (2026-09-04): XAUT and PAXG used to alias to GOLD alongside XAU. The
+# comment above them called that "a HYPOTHESIS for the convergence gate to
+# test" -- but aliasing does not test a hypothesis, it ASSUMES it, and the
+# assumption is wrong in a specific way: XAUT and PAXG are different issuers'
+# tokens. A XAUT-vs-PAXG pair measures the ISSUER basis (two custodians'
+# credit and redemption frictions), not a venue basis, and no amount of
+# waiting makes those converge. They are now separate assets, by exactly the
+# reasoning that already kept SPY/SP500 unaliased: same underlying is not the
+# same instrument.
+# Cross-issuer pairs are still visible -- as GOLD_XAUT vs GOLD_PAXG in the
+# ranking, where they can be judged on their own merits -- rather than
+# silently mixed into "GOLD".
+CANON = {"OPENAI": "OAI", "ANTHROPIC": "ANTH", "XAG": "SILVER",
+         "XAU": "GOLD_IDX", "XAUT": "GOLD_XAUT", "PAXG": "GOLD_PAXG"}
 
 MIN_VOL24_USD = 1.0        # a market with no 24h volume is not a leg
 SCALE_MAX = 2.0            # legs whose mids differ by more than this are not
@@ -415,7 +424,16 @@ def build_pairs():
             empty.append(name)
     if empty:
         log(f"no traded market (skipped): {', '.join(empty)}")
+    return pair_up(venues)
 
+
+def pair_up(venues: dict):
+    """(venue id -> {ticker -> leg meta})  ->  (pairs, snapshot).
+
+    Split out of build_pairs so the pairing RULES can be tested without a
+    network: which tickers count as the same asset, and which combinations
+    are not pairs at all.
+    """
     # canonical ticker -> [(venue id, leg meta)]
     book: dict = {}
     for vid, syms in venues.items():
@@ -431,6 +449,17 @@ def build_pairs():
         for i in range(len(legs)):
             for j in range(i + 1, len(legs)):
                 (va, ma), (vb, mb) = legs[i], legs[j]
+                if va == vb:
+                    # B8 (2026-09-04): both legs on the SAME venue is not an
+                    # arbitrage, it is one exchange's two tickers for the same
+                    # thing. It used to be reachable whenever a venue listed
+                    # two symbols that canonicalise together (Bitget lists
+                    # XAUT and PAXG), and it produced pairs like
+                    # GOLD@bitget-bitget that inflated the ranking with a
+                    # spread nobody can trade: there is no second book to
+                    # hedge on, and the engine itself refuses the config
+                    # (config.py raises when both legs are one market).
+                    continue
                 pairs.append({
                     "pair": f"{canon}@{NAME.get(va, va)}-{NAME.get(vb, vb)}",
                     "leg_a": NAME.get(va, va), "a": ma,
