@@ -1,5 +1,8 @@
 # 憑證：永不進 git。交易金鑰只存在跑引擎的那台機器上。
-.env
+# 用 .env* 而不是 .env：記事本會把 ".env" 存成 ".env.txt"，差三個字元
+# 就等於把密鑰提交上去。
+.env*
+!.env.example
 *.key
 engine/config.yaml
 
