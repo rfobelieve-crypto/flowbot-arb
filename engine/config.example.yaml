@@ -184,3 +184,26 @@ risk:
   # 价差上限：本家族实测带宽 2-15 bps，读到几百 bps 意味着盘口错了（标的停牌/
   # 下市、持续坏点、预言机断线），不是市场慷慨。只跳过不停机；设 0 关闭。
   max_edge_bps: 150.0
+  # ---- volatility circuit breaker (2026-09-04) ---------------------------
+  # The largest peak-to-trough move, in bps, that either venue's mid may make
+  # inside vol_window_sec before the engine stops opening NEW exposure for
+  # vol_cooldown_sec. Every other switch above is one-way and needs a
+  # restart; this one is a PAUSE and lifts itself, because volatility fixes
+  # itself and a breaker that needs a human after every news spike gets
+  # switched off. Hedging, flattening, self-rescue and reconcile are NEVER
+  # paused — refusing to open during a storm while also refusing to close is
+  # the worst of both. A resting maker quote is pulled immediately.
+  # It measures RANGE, not standard deviation: what costs money is how far
+  # the price travelled between reading the book and the second leg filling,
+  # and a single jump inside an otherwise quiet window is exactly the shape a
+  # standard deviation averages away.
+  # Pick it from recorded minute data: comfortably above the instrument's
+  # ordinary 30-second range, well below a news move. 0 disables, and live
+  # trading refuses to start while it is 0.
+  # 波动熔断：任一交易所中价在 vol_window_sec 内的最大波峰-波谷幅度（bps），
+  # 超过即暂停开新仓 vol_cooldown_sec 秒。这是唯一会自动恢复的开关；对冲、
+  # 平仓、自救、对帐永不暂停，挂单会立刻撤回。用录制的分钟数据挑这个值：
+  # 明显高于平时的 30 秒波幅，明显低于新闻行情。0 = 关闭，且实盘会拒绝启动。
+  vol_window_sec: 30.0
+  vol_max_move_bps: 40.0
+  vol_cooldown_sec: 60.0

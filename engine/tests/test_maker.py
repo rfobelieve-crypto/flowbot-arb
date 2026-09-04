@@ -129,6 +129,8 @@ def make_cfg(**over):
         "midline_bps": 0.0, "upper_bps": 2.0, "lower_bps": 2.0,
         "mode": "maker", "maker_timeout_sec": 0.15, "cancel_timeout_sec": 0.1,
         "maker_poll_sec": 0.01, "max_net_base": 0.003,
+        "vol_window_sec": 30.0, "vol_max_move_bps": 0.0,
+        "vol_cooldown_sec": 60.0,
     }
     body.update(over)
     f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
@@ -150,6 +152,9 @@ sizing:
   max_order_notional_usd: 500.0
 risk:
   max_net_base: {body['max_net_base']}
+  vol_window_sec: {body['vol_window_sec']}
+  vol_max_move_bps: {body['vol_max_move_bps']}
+  vol_cooldown_sec: {body['vol_cooldown_sec']}
 """)
     f.close()
     return load_config(f.name, NO_ENV, symbol="SNDK", hedge_venue="lighter-rh")

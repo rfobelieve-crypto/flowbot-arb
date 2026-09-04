@@ -199,6 +199,16 @@ class Config:
     # losing side of it. premium_persist_sec filters a one-tick phantom; this
     # filters a book that is persistently wrong. 0 = disabled.
     max_edge_bps: float
+    # Volatility circuit breaker (2026-09-04): the largest peak-to-trough
+    # move, in bps, that either venue's mid may make inside vol_window_sec
+    # before the engine stops opening NEW exposure for vol_cooldown_sec.
+    # Unlike every other switch here this one is a PAUSE, not a HALT --
+    # volatility fixes itself, and a breaker that needs a human restart after
+    # every news spike gets switched off. Hedging, flattening, self-rescue
+    # and reconcile are never paused. 0 = disabled.
+    vol_window_sec: float
+    vol_max_move_bps: float
+    vol_cooldown_sec: float
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -271,6 +281,9 @@ _SCHEMA: Dict[str, Any] = {
         "max_consecutive_stale": int,  # B4: stale books N times in a row -> halt
         "halt_flatten_attempts": int,  # B4: reduce-only hedges allowed AFTER halt
         "max_edge_bps": float,        # B4: refuse an edge too good to be true
+        "vol_window_sec": float,      # volatility breaker: measurement window
+        "vol_max_move_bps": float,    # ... peak-to-trough that trips it
+        "vol_cooldown_sec": float,    # ... how long the pause lasts
     },
     "execution": {
         "mode": str,                  # B3: taker | maker
@@ -436,6 +449,19 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     maker_csv = _get(raw, "logging", "maker_csv", None) or os.path.join(
         os.path.dirname(trades_csv), "maker.csv")
 
+    vol_window_sec = float(_get(raw, "risk", "vol_window_sec", 30.0))
+    vol_max_move_bps = float(_get(raw, "risk", "vol_max_move_bps", 0.0))
+    vol_cooldown_sec = float(_get(raw, "risk", "vol_cooldown_sec", 60.0))
+    if vol_max_move_bps < 0:
+        raise ConfigError("risk.vol_max_move_bps must be >= 0 (0 disables)")
+    if vol_max_move_bps and vol_window_sec <= 0:
+        raise ConfigError("risk.vol_window_sec must be > 0 when the "
+                          "volatility breaker is armed")
+    if vol_max_move_bps and vol_cooldown_sec <= 0:
+        raise ConfigError("risk.vol_cooldown_sec must be > 0 when the "
+                          "volatility breaker is armed (a pause of zero "
+                          "seconds is not a pause)")
+
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
         raise ConfigError("sizing.take_fraction must be in (0, 1] — taking "
@@ -528,6 +554,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         max_consecutive_stale=max_consecutive_stale,
         halt_flatten_attempts=halt_flatten_attempts,
         max_edge_bps=max_edge_bps,
+        vol_window_sec=vol_window_sec,
+        vol_max_move_bps=vol_max_move_bps,
+        vol_cooldown_sec=vol_cooldown_sec,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,

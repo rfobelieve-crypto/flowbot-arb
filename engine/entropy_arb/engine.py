@@ -30,6 +30,7 @@ from .book import (ArbPlan, MakerPlan, floor_step, maker_edge_bps, plan_arb,
 from .config import Config
 from .maker import MakerOrder
 from .recorder import MinuteRecorder
+from .volatility import VolatilityBreaker
 from .venue_hl import HLVenue
 from .venue_lighter import LighterVenue
 
@@ -79,6 +80,11 @@ class Engine:
         self._halt_stuck_logged = False
         self._halt_ticks = 0
         self._absurd_skips = 0            # edges refused as too-good-to-be-true
+        # Volatility breaker: the only switch here that lifts itself. It
+        # stops NEW exposure while a book is moving too fast and leaves
+        # hedging, flattening and reconcile alone.
+        self.vol = VolatilityBreaker(cfg.vol_window_sec, cfg.vol_max_move_bps,
+                                     cfg.vol_cooldown_sec)
         self.consec_errors = 0
         self.last_trade_ts = 0.0
         self.trades = 0
@@ -381,6 +387,27 @@ class Engine:
         if self.halted:
             return
         now = time.time()
+        # Only fresh books are sampled. During an outage the mid does not
+        # change but time does, and measuring the jump on reconnection would
+        # report how far the market moved while we were blind -- a fact
+        # about the connection, not about volatility.
+        for v in self.venues.values():
+            if v.book.is_fresh(cfg.staleness_sec):
+                self.vol.observe(v.key, v.book.mid(), now)
+        tripped = self.vol.check(now)
+        if tripped:
+            log.critical(
+                "VOLATILITY PAUSE: %s — opening no NEW exposure for %.0fs. "
+                "Hedging, flattening, self-rescue and reconcile continue "
+                "unchanged. / 波动熔断：暂停开新仓 %.0f 秒；对冲、平仓、"
+                "自救与对帐不受影响。", tripped, cfg.vol_cooldown_sec,
+                cfg.vol_cooldown_sec)
+        if self.vol.paused(now):
+            left = self.vol.remaining(now)
+            self._skiplog("volatility pause: %.0fs left — %s", left,
+                          self.vol.reason)
+            self._schedule_poke(min(max(left, 0.1), 5.0))
+            return
         if now - self.last_trade_ts < cfg.cooldown_sec:
             self._schedule_poke(cfg.cooldown_sec - (now - self.last_trade_ts))
             return
@@ -981,6 +1008,10 @@ class Engine:
             return "shutdown"
         if self.halted:
             return "engine halted — no new exposure"
+        if self.vol.paused(now):
+            # A quote left resting through a fast move is the definition of
+            # being picked off: our price is the one that stopped updating.
+            return f"volatility breaker — {self.vol.reason}"
         if now >= deadline:
             return f"unfilled after {cfg.maker_timeout_sec:.1f}s"
         if maker_v.key in self._venue_down or taker_v.key in self._venue_down:
@@ -1212,6 +1243,7 @@ class Engine:
         ("max_daily_loss_usd", "session mark-to-market floor"),
         ("max_consecutive_stale", "stale-book evaluations before HALT"),
         ("max_edge_bps", "premium above which the BOOK is assumed wrong"),
+        ("vol_max_move_bps", "peak-to-trough move that pauses new exposure"),
     )
 
     def _require_armed_risk_block(self) -> None:
@@ -1624,6 +1656,11 @@ class Engine:
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
                     rec += f" | *** UNRESOLVED CANCELS x{self.maker_unknown} ***"
+            if self.vol.paused(time.time()):
+                rec += (f" | *** VOL-PAUSE {self.vol.remaining(time.time()):.0f}s"
+                        f" ({self.vol.reason}) ***")
+            elif self.vol.trips:
+                rec += f" | vol trips {self.vol.trips}"
             if self._absurd_skips:
                 rec += f" | refused x{self._absurd_skips}"
             if self._stale_streak:
