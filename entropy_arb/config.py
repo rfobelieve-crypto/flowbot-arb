@@ -167,6 +167,13 @@ class Config:
     # flatten an imbalance that already exists. 0 = freeze on halt (leaves
     # naked exposure); the default lets the engine unwind what it can.
     halt_flatten_attempts: int
+    # B4 (2026-09-04): ceiling on the top-of-book premium the engine will act
+    # on. An edge far outside the measured band means the book is wrong (a
+    # halted or delisted underlying, a bad tick that persists, an oracle
+    # break) -- and acting on a wrong book is exactly how you end up on the
+    # losing side of it. premium_persist_sec filters a one-tick phantom; this
+    # filters a book that is persistently wrong. 0 = disabled.
+    max_edge_bps: float
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -235,6 +242,7 @@ _SCHEMA: Dict[str, Any] = {
         "max_gross_usd": float,       # B4: absolute sum |pos x mid| ceiling
         "max_consecutive_stale": int,  # B4: stale books N times in a row -> halt
         "halt_flatten_attempts": int,  # B4: reduce-only hedges allowed AFTER halt
+        "max_edge_bps": float,        # B4: refuse an edge too good to be true
     },
     "execution": {
         "premium_persist_sec": float,
@@ -363,6 +371,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     halt_flatten_attempts = int(_get(raw, "risk", "halt_flatten_attempts", 3))
     if halt_flatten_attempts < 0:
         raise ConfigError("risk.halt_flatten_attempts must be >= 0")
+    max_edge_bps = float(_get(raw, "risk", "max_edge_bps", 0.0))
+    if max_edge_bps < 0:
+        raise ConfigError("risk.max_edge_bps must be >= 0 (0 disables)")
 
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
@@ -447,6 +458,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         max_gross_usd=max_gross_usd,
         max_consecutive_stale=max_consecutive_stale,
         halt_flatten_attempts=halt_flatten_attempts,
+        max_edge_bps=max_edge_bps,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,

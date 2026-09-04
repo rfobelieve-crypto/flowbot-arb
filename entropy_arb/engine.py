@@ -67,6 +67,7 @@ class Engine:
         self._halt_last_net: Optional[float] = None
         self._halt_stuck_logged = False
         self._halt_ticks = 0
+        self._absurd_skips = 0            # edges refused as too-good-to-be-true
         self.consec_errors = 0
         self.last_trade_ts = 0.0
         self.trades = 0
@@ -155,6 +156,7 @@ class Engine:
 
         live = not self.record_only
         if live:
+            self._require_armed_risk_block()
             if not cfg.creds_complete:
                 raise RuntimeError(
                     "live trading needs credentials for both venues in .env "
@@ -445,6 +447,21 @@ class Engine:
                 continue
             if plan is None:
                 continue
+            # too good to be true (2026-09-04). Measured bands on this family
+            # are 2-15 bps; a reading in the hundreds means the book is wrong,
+            # not that the market is generous. Two of our own instruments were
+            # delisted mid-recording, which is exactly the shape that leaves a
+            # wide, stale book still answering REST.
+            ceil_bps = cfg.max_edge_bps
+            if ceil_bps > 0 and plan.top_premium_bps > ceil_bps:
+                self._absurd_skips += 1
+                self._skiplog("%s REFUSED: premium %.1f bps exceeds "
+                              "max_edge_bps %.1f — treating the book as wrong, "
+                              "not the market as generous (skips=%d)",
+                              dkey, plan.top_premium_bps, ceil_bps,
+                              self._absurd_skips)
+                self._armed[dkey] = None
+                continue
             headroom = self._headroom(buy, sell, plan.buy_limit)
             if headroom < plan.buy_notional:
                 plan, _ = self._plan(buy, sell,
@@ -565,6 +582,39 @@ class Engine:
             "prem_bps": plan.marginal_premium_bps,
             "exp": plan.exp_edge_usd, "fill": fill_edge, "status": status,
             "ok": ok})
+
+    # Risk switches that must be explicitly chosen before real money moves.
+    # None has a defensible universal default -- the dollar ones depend on
+    # account size, and a wrong ceiling is worse than a missing one -- so
+    # live trading refuses to start until the operator writes each number.
+    REQUIRED_RISK: tuple = (
+        ("max_net_base", "largest |legA+legB| before HALT"),
+        ("max_gross_usd", "total |position x mid| ceiling across venues"),
+        ("max_daily_loss_usd", "session mark-to-market floor"),
+        ("max_consecutive_stale", "stale-book evaluations before HALT"),
+        ("max_edge_bps", "premium above which the BOOK is assumed wrong"),
+    )
+
+    def _require_armed_risk_block(self) -> None:
+        """Refuse to trade with unarmed risk switches.
+
+        A switch that exists and a switch that is armed are different facts,
+        and nothing in a running system shows the difference. Checked here,
+        beside the credentials check, because this is the last moment before
+        real orders become possible.
+        """
+        missing = [(k, d) for k, d in self.REQUIRED_RISK
+                   if not getattr(self.cfg, k, 0)]
+        if not missing:
+            return
+        lines = "\n".join(f"  {k}: <value>   # {d}" for k, d in missing)
+        raise RuntimeError(
+            "live trading refused: these risk switches are unset (0 = "
+            "disabled). Add them under `risk:` in the config file, then "
+            "restart. Use --record-only to collect data without them.\n"
+            "实盘拒绝启动：以下风控开关未设定（0 = 关闭），请在设定档的 "
+            "`risk:` 区块写入数值后重启；仅采集资料请用 --record-only。\n"
+            "risk:\n" + lines)
 
     def _recorder_died(self, task) -> None:
         """G5: the recorder task finished. Cancellation at shutdown is
@@ -930,6 +980,8 @@ class Engine:
             pnl = self.session_pnl()
             rec = (f" | rec {self.recorder.rows_written} rows"
                    if self.recorder else "")
+            if self._absurd_skips:
+                rec += f" | refused x{self._absurd_skips}"
             if self._stale_streak:
                 rec += f" | stale x{self._stale_streak}"
             if self.halted and self._halt_last_net is not None:

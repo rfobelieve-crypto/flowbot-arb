@@ -136,3 +136,10 @@ risk:
   # 所以短暂断线不会耗尽它。用完之后改为每 20 个对帐周期重试一次，永不永久放弃。
   # 设 0 = 冻结（留下裸露，除非你会手动平仓否则不要设）。
   halt_flatten_attempts: 3
+  # Ceiling on the top-of-book premium the engine will act on. Measured bands
+  # on this family are 2-15 bps, so a reading in the hundreds means the BOOK is
+  # wrong (halted/delisted underlying, persistent bad tick, oracle break), not
+  # that the market is generous. Skipped, not halted. 0 disables.
+  # 价差上限：本家族实测带宽 2-15 bps，读到几百 bps 意味着盘口错了（标的停牌/
+  # 下市、持续坏点、预言机断线），不是市场慷慨。只跳过不停机；设 0 关闭。
+  max_edge_bps: 150.0
