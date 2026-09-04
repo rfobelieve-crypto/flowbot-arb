@@ -44,11 +44,19 @@ thresholds:
 entropy:
   dex: io                    # Entropy's dex name on Hyperliquid / Entropy 的 dex 名
   taker_fee_bps: 0.0         # taker fee / 吃单手续费
+  # B3: the MAKER fee, which is a different number and the entire reason the
+  # maker path exists. May be negative where the venue pays a rebate.
+  # Defaults to taker_fee_bps, never to zero: a fee schedule you have not
+  # verified on a real receipt is not a discount, it is a guess.
+  # 挂单手续费（可为负＝返佣）。未填则默认等于吃单费——没有对过帐单的费率
+  # 不能当成折扣。
+  maker_fee_bps: 0.0
   max_position_usd: 1000     # position cap / 持仓上限（美元）
   max_orders_per_min: 120    # order-send budget, sliding 60s / 每分钟下单预算
 
 hedge:
   taker_fee_bps: 0.0         # Lighter venues: 0; tradexyz: ~1.0
+  maker_fee_bps: 0.0
   max_position_usd: 1000
   max_orders_per_min: 30     # Lighter's ceiling is ~40/min / Lighter 上限约 40/分钟
 
@@ -70,6 +78,33 @@ inventory:
 
 # ======================= EXECUTION / 执行参数 ==============================
 execution:
+  # ---- B3 maker path (2026-09-04) ----------------------------------------
+  # taker: both legs are IOC, sent together (the original behaviour, and the
+  #        default -- every config written before B3 loads unchanged).
+  # maker: ONE leg rests as a post-only order and whatever fills is hedged
+  #        with an IOC on the other venue. COST_INVENTORY puts the taker
+  #        hurdle at 13.5 bps and the maker hurdle at 4.5 bps, which is why
+  #        this exists; it is also strictly harder to get right, because the
+  #        exchange owns the truth about our position for as long as the
+  #        quote rests.
+  # taker：两条腿同时 IOC（原有行为，默认值）。maker：一条腿挂 post-only，
+  # 成交多少就在另一所对冲多少。挂单门槛 4.5 bps vs 吃单 13.5 bps。
+  mode: taker
+  maker_venue: entropy       # which leg rests / 哪条腿挂单（entropy | hedge）
+  maker_timeout_sec: 5.0     # quote lifetime before cancel / 挂单存活时间
+  # The cancel gets its OWN budget, deliberately separate from staleness_sec
+  # and from the quote's lifetime. A cancel unconfirmed past this is treated
+  # as POSSIBLY FILLED -- never as cancelled (PEER_INFRA.md S7 must #3).
+  # 撤单有独立的时间预算；超时未确认一律当作「可能已成交」，不是「已撤」。
+  cancel_timeout_sec: 3.0
+  maker_poll_sec: 0.25       # how often a resting order is read / 挂单轮询间隔
+  # Cancel a resting quote once its edge, measured against the CURRENT hedge
+  # book and net of both fees, falls below this. 0 = pull it the moment the
+  # trade would lose money. Raise it to leave more cushion for the round trip.
+  # 挂单的边际（按当前对冲盘口、扣两边手续费）低于此值即撤单；0 = 一旦会亏
+  # 就撤。
+  maker_min_edge_bps: 0.0
+  # ------------------------------------------------------------------------
   premium_persist_sec: 0     # edge must persist this long before firing / 信号需持续时间
   cooldown_sec: 0.0            # min gap between executions / 两次执行的最小间隔
   settle_timeout_sec: 10.0      # wait for fill confirmation / 等待成交确认
@@ -104,6 +139,12 @@ logging:
   level: INFO
   status_interval_sec: 30.0
   trades_csv: logs/trades.csv
+  # B3: resting quotes get their own file — rest time, fill vs cancel, cancel
+  # latency and the hedge lag have no meaning for an IOC pair. This is the
+  # direct input to LIVE_50U_SPEC M2 (fill rate) and M4 (two-leg latency).
+  # Defaults to maker.csv beside trades_csv.
+  # 挂单执行单独记一份：挂单存活时间、成交/撤单、撤单延迟、对冲延迟。
+  maker_csv: logs/maker.csv
   dashboard: true
   file: logs/engine.log
 

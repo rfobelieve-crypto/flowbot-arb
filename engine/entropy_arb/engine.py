@@ -110,7 +110,8 @@ class Engine:
         # stays in this map until the EXCHANGE resolves it, so an unconfirmed
         # cancel blocks the next quote instead of being quietly forgotten.
         self._maker_open: Dict[str, MakerOrder] = {}
-        self.maker_posts = 0        # quotes sent           -> M2 denominator
+        self.maker_posts = 0        # quotes attempted
+        self.maker_rested = 0       # quotes confirmed ON the book -> M2 denom
         self.maker_fills = 0        # quotes that got any fill -> M2 numerator
         self.maker_cancels = 0      # quotes cancelled unfilled
         self.maker_rejects = 0      # post-only rejections (book moved)
@@ -749,6 +750,22 @@ class Engine:
 
     async def _execute_maker(self, maker_v, taker_v, plan: MakerPlan,
                              order: MakerOrder) -> None:
+        """One quote, start to finish. The wrapper exists so that the order
+        is retired through exactly one path: a crash inside the order loop
+        must not leave a possibly-live quote counted as nothing."""
+        try:
+            await self._quote(maker_v, taker_v, plan, order)
+        except asyncio.CancelledError:
+            raise
+        except Exception:                                       # noqa: BLE001
+            log.exception("[QUOTE] order loop crashed — %s", order.describe())
+            self._risk_halt("the maker order loop crashed while an order may "
+                            "still be live on the venue")
+        finally:
+            await self._finish_maker(maker_v, taker_v, plan, order)
+
+    async def _quote(self, maker_v, taker_v, plan: MakerPlan,
+                     order: MakerOrder) -> None:
         cfg = self.cfg
         dkey = order.stats.get("dkey", "?")
         self.maker_posts += 1
@@ -785,7 +802,6 @@ class Engine:
                           "moved between planning and sending (x%d)",
                           dkey, maker_v.name, self.maker_rejects)
             order.apply("canceled-post-only")
-            await self._finish_maker(maker_v, taker_v, plan, order)
             return
         if status == "send-failed":
             log.error("[QUOTE] %s: send failed on %s: %s", dkey,
@@ -800,9 +816,7 @@ class Engine:
             # retire an order without a poll, and only because the rejection
             # IS the exchange's report.
             order.apply("rejected")
-            await self._finish_maker(maker_v, taker_v, plan, order)
             return
-        self.consec_errors = 0
         if status == "filled":
             order.apply("filled", res.get("filled_base"), res.get("avg_px"))
         elif status == "resting":
@@ -816,6 +830,17 @@ class Engine:
                         "treating the order as LIVE and cancelling it",
                         dkey, maker_v.name, err)
             order.stats["force"] = "send outcome unknown"
+            if order.handle is None:
+                # Both venues allocate the id before the network call, so
+                # this only happens when the venue adapter itself blew up.
+                # We may have an order on the book that we cannot address --
+                # there is no pessimistic ACTION available, only a halt.
+                self._risk_halt(
+                    "a maker send failed before the order could be named — "
+                    "an order may be live on %s with no id to cancel it by; "
+                    "check the venue by hand / 挂单在拿到编号前就失败，可能"
+                    "有无法撤销的挂单，请手动到交易所确认" % maker_v.name)
+                return
         await self._maker_lifecycle(maker_v, taker_v, plan, order)
 
     async def _maker_lifecycle(self, maker_v, taker_v, plan: MakerPlan,
@@ -839,7 +864,15 @@ class Engine:
             if info is not None:
                 order.apply(info["status"], info.get("filled_base"),
                             info.get("avg_px"))
-            await self._consume_maker_fill(maker_v, taker_v, order)
+            # The venue lock is held across booking AND hedging: between
+            # writing the fill into maker_v.position and the hedge landing,
+            # the net-delta hedge would otherwise see a one-sided position
+            # and reduce it -- and then our hedge would land on top, leaving
+            # the imbalance mirrored instead of removed. _hedge skips a
+            # locked venue and carries to the next reconcile, which is the
+            # right outcome for those few hundred milliseconds.
+            async with self._vlock(maker_v.key):
+                await self._consume_maker_fill(maker_v, taker_v, order)
             if order.is_terminal:
                 break
             reason = self._maker_cancel_reason(maker_v, taker_v, order, now,
@@ -884,7 +917,7 @@ class Engine:
                 self._reconcile_evt.set()
             if self.stop.is_set():
                 if stop_deadline is None:
-                    stop_deadline = now + max(cfg.cancel_timeout_sec * 2, 5.0)
+                    stop_deadline = now + max(cfg.cancel_timeout_sec * 2, 1.0)
                 elif now > stop_deadline:
                     log.critical(
                         "SHUTTING DOWN WITH AN UNRESOLVED MAKER ORDER: %s — "
@@ -893,7 +926,6 @@ class Engine:
                     break
             await asyncio.sleep(base_poll if order.state != mk.UNKNOWN
                                 else max(base_poll, 2.0))
-        await self._finish_maker(maker_v, taker_v, plan, order)
 
     async def _poll_maker(self, maker_v, order: MakerOrder):
         """One read of exchange truth, or None when we learned nothing.
@@ -1073,6 +1105,7 @@ class Engine:
                  taker_v.name, "BUY" if is_buy else "SELL", fill, qty,
                  info.get("status"), order.stats["hedge_ms"])
         if info.get("err") or info.get("unresolved"):
+            order.stats["hedge_error"] = True
             log.error("[QUOTE HEDGE] %s: %s — the net-delta hedge takes over",
                       taker_v.name, info.get("err") or "unresolved")
             if str(info.get("err") or "").startswith("RATE_LIMITED"):
@@ -1083,8 +1116,6 @@ class Engine:
                     self._risk_halt(f"{self.consec_errors} consecutive "
                                     f"execution problems")
             self._reconcile_evt.set()
-        else:
-            self.consec_errors = 0
 
     async def _finish_maker(self, maker_v, taker_v, plan: MakerPlan,
                             order: MakerOrder) -> None:
@@ -1093,13 +1124,30 @@ class Engine:
         which is the intended consequence of not knowing."""
         filled = order.filled_base
         if order.is_terminal:
-            outcome = "filled" if filled > 0 else "cancelled"
+            if filled > 0:
+                outcome = "filled"
+            elif order.status == "canceled-post-only":
+                outcome = "post-only-reject"   # never reached the book
+            elif order.status == "rejected":
+                outcome = "send-failed"
+            else:
+                outcome = "cancelled"
             self._maker_open.pop(maker_v.key, None)
         elif self.stop.is_set():
             outcome = "unresolved-at-shutdown"
             self._maker_open.pop(maker_v.key, None)
         else:
             outcome = "unresolved"
+        rested = (any(st in mk.OPEN_STATUSES for st in order.seen)
+                  or filled > 0)
+        if rested:
+            self.maker_rested += 1
+        if (outcome in ("filled", "cancelled", "post-only-reject")
+                and not order.stats.get("hedge_error")):
+            # A quote that reached a clean end -- including one that simply
+            # never filled -- is evidence the execution path works. A send
+            # that merely left the building is not.
+            self.consec_errors = 0
         if filled > 0:
             self.maker_fills += 1
             self.trades += 1
@@ -1454,6 +1502,20 @@ class Engine:
                 if mid is not None:
                     v.cash -= delta * mid
                 v.position = r
+                # B3: a chain read is COMPLETE as of the moment it was taken,
+                # so after adopting it no per-order delta may be added on top
+                # -- that would book the same fill twice. Any fill the chain
+                # already contains but we had not hedged becomes the
+                # net-delta hedge's problem, and _maybe_hedge runs right
+                # after this in _reconcile_positions.
+                order = self._maker_open.get(v.key)
+                if order is not None and (order.unapplied or order.unhedged):
+                    log.warning("[%s] reconcile supersedes maker accounting "
+                                "(%.6g unbooked, %.6g unhedged): %s",
+                                v.name, order.unapplied, order.unhedged,
+                                order.describe())
+                    order.mark_applied(order.unapplied)
+                    order.mark_hedged(order.unhedged)
 
     async def _reconcile_loop(self) -> None:
         while not self.stop.is_set():
@@ -1551,6 +1613,17 @@ class Engine:
             pnl = self.session_pnl()
             rec = (f" | rec {self.recorder.rows_written} rows"
                    if self.recorder else "")
+            if cfg.mode == "maker":
+                fill_rate = (100.0 * self.maker_fills / self.maker_rested
+                             if self.maker_rested else 0.0)
+                rec += (f" | quotes {self.maker_rested}/{self.maker_posts}"
+                        f" fills {self.maker_fills}"
+                        f" ({fill_rate:.0f}%) cx {self.maker_cancels}"
+                        f" po-rej {self.maker_rejects}")
+                for o in self._maker_open.values():
+                    rec += f" | RESTING {o.describe()}"
+                if self.maker_unknown:
+                    rec += f" | *** UNRESOLVED CANCELS x{self.maker_unknown} ***"
             if self._absurd_skips:
                 rec += f" | refused x{self._absurd_skips}"
             if self._stale_streak:
