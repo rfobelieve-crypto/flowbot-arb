@@ -239,6 +239,11 @@ class Config:
     trades_csv: str
     maker_csv: str
     shadow_csv: str
+    # B6 前置：引擎把「已經在算的東西」序列化出來。status_json 就是之後
+    # 原封不動 POST 給 Vercel 的那個物件；status_html 是本機看的方便，
+    # 自我刷新、零依賴、沒有按鈕。空字串 = 不寫。
+    status_json: str
+    status_html: str
     dashboard: bool
     log_file: str
     # runtime
@@ -340,6 +345,8 @@ _SCHEMA: Dict[str, Any] = {
         "trades_csv": str,
         "maker_csv": str,
         "shadow_csv": str,
+        "status_json": str,
+        "status_html": str,
         "dashboard": bool,
         "file": str,
     },
@@ -476,6 +483,12 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         os.path.dirname(trades_csv), "maker.csv")
     shadow_csv = _get(raw, "logging", "shadow_csv", None) or os.path.join(
         os.path.dirname(trades_csv), "shadow.csv")
+    status_json = _get(raw, "logging", "status_json", None)
+    if status_json is None:
+        status_json = os.path.join(os.path.dirname(trades_csv), "status.json")
+    status_html = _get(raw, "logging", "status_html", None)
+    if status_html is None:
+        status_html = os.path.join(os.path.dirname(trades_csv), "status.html")
 
     vol_window_sec = float(_get(raw, "risk", "vol_window_sec", 30.0))
     vol_max_move_bps = float(_get(raw, "risk", "vol_max_move_bps", 0.0))
@@ -633,6 +646,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         trades_csv=trades_csv,
         maker_csv=maker_csv,
         shadow_csv=shadow_csv,
+        status_json=status_json,
+        status_html=status_html,
         dashboard=bool(_get(raw, "logging", "dashboard", True)),
         log_file=_get(raw, "logging", "file", "logs/engine.log"),
     )

@@ -2107,6 +2107,11 @@ class Engine:
                         + (" STUCK" if self._halt_stuck_logged else "") + ")")
             if self._recorder_dead:
                 rec += f" *** RECORDER DEAD: {self._recorder_dead[:60]} ***"
+            # Sidecar, and the last thing the loop does: a snapshot that
+            # fails must not cost the status line (CLAUDE.md S2).
+            if cfg.status_json:
+                from .snapshot import write as write_snapshot
+                write_snapshot(self, cfg.status_json, cfg.status_html or None)
             log.info("[status] %s | prem %s bps (band %+.2f..%+.2f) | pos %s "
                      "net %+.6g | trades %d hedges %d | MTM %s expEdge $%.4f "
                      "fillEdge $%.4f%s%s",
