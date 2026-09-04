@@ -154,6 +154,19 @@ class Config:
     # when session PnL drops below -this. Constant cost: session_pnl() is a
     # sum over two venues, no I/O. 0 = disabled (not recommended once live).
     max_daily_loss_usd: float
+    # B4 (2026-09-04): absolute ceiling on total gross exposure across both
+    # venues. cap_usd is PER VENUE, so a config typo that scales size by 10x
+    # passes every per-venue check. This is the backstop for that.
+    max_gross_usd: float
+    # B4: books stale this many evaluations in a row -> halt. "Stale forever"
+    # currently looks identical to "quiet market", which is a silent-failure
+    # shape (the venue_down path only covers position-fetch failures, not a
+    # dead book feed while REST still answers).
+    max_consecutive_stale: int
+    # B4: how many reduce-only hedges are still allowed AFTER a halt, to
+    # flatten an imbalance that already exists. 0 = freeze on halt (leaves
+    # naked exposure); the default lets the engine unwind what it can.
+    halt_flatten_attempts: int
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -219,6 +232,9 @@ _SCHEMA: Dict[str, Any] = {
     "risk": {
         "max_net_base": float,      # B4/G1: hard cap on |leg A + leg B|
         "max_daily_loss_usd": float,  # B4: session MTM floor, halts on breach
+        "max_gross_usd": float,       # B4: absolute sum |pos x mid| ceiling
+        "max_consecutive_stale": int,  # B4: stale books N times in a row -> halt
+        "halt_flatten_attempts": int,  # B4: reduce-only hedges allowed AFTER halt
     },
     "execution": {
         "premium_persist_sec": float,
@@ -338,6 +354,15 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     max_daily_loss_usd = float(_get(raw, "risk", "max_daily_loss_usd", 0.0))
     if max_daily_loss_usd < 0:
         raise ConfigError("risk.max_daily_loss_usd must be >= 0 (0 disables)")
+    max_gross_usd = float(_get(raw, "risk", "max_gross_usd", 0.0))
+    if max_gross_usd < 0:
+        raise ConfigError("risk.max_gross_usd must be >= 0 (0 disables)")
+    max_consecutive_stale = int(_get(raw, "risk", "max_consecutive_stale", 0))
+    if max_consecutive_stale < 0:
+        raise ConfigError("risk.max_consecutive_stale must be >= 0 (0 disables)")
+    halt_flatten_attempts = int(_get(raw, "risk", "halt_flatten_attempts", 3))
+    if halt_flatten_attempts < 0:
+        raise ConfigError("risk.halt_flatten_attempts must be >= 0")
 
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
@@ -419,6 +444,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     return Config(
         max_net_base=max_net_base,
         max_daily_loss_usd=max_daily_loss_usd,
+        max_gross_usd=max_gross_usd,
+        max_consecutive_stale=max_consecutive_stale,
+        halt_flatten_attempts=halt_flatten_attempts,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,

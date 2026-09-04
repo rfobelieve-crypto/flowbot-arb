@@ -119,3 +119,15 @@ risk:
   # drops below -this. 0 disables (not recommended live).
   # 本次运行的 MTM 亏损下限（USD），超过即整机停止下单；0 关闭。
   max_daily_loss_usd: 20.0
+  # Absolute ceiling on sum |position x mid| across BOTH venues. cap_usd is
+  # per-venue, so this is the backstop for a config typo. 0 disables.
+  # 两条腿名目金额合计上限；cap_usd 是逐场馆的，这一条是设定打错时的兜底。
+  max_gross_usd: 400.0
+  # Books stale this many evaluations in a row -> halt. A dead feed and a
+  # quiet market look identical without this. 0 disables.
+  # 连续 N 次盘口过期即停机——没有这条，行情安静和数据源死掉长得一样。
+  max_consecutive_stale: 20
+  # Reduce-only hedges still allowed AFTER a halt, to flatten an imbalance
+  # that already exists. 0 = freeze (leaves naked exposure).
+  # 停机后仍允许的 reduce-only 对冲次数，用来平掉已经存在的裸露；0 = 冻结。
+  halt_flatten_attempts: 3

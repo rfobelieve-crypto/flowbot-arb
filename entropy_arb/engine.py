@@ -59,6 +59,8 @@ class Engine:
         self._exec_tasks: set = set()
         self.halted = False
         self._recorder_dead: Optional[str] = None   # G5: sidecar liveness
+        self._stale_streak = 0            # B4: consecutive stale evaluations
+        self._halt_flattens = 0           # B4: reduce-only hedges since halt
         self.consec_errors = 0
         self.last_trade_ts = 0.0
         self.trades = 0
@@ -390,8 +392,20 @@ class Engine:
         best = None
         for buy, sell, dkey in ((self.hedge, self.entropy, "sell_entropy"),
                                 (self.entropy, self.hedge, "buy_entropy")):
-            if not (buy.book.is_fresh(cfg.staleness_sec)
-                    and sell.book.is_fresh(cfg.staleness_sec)):
+            fresh = (buy.book.is_fresh(cfg.staleness_sec)
+                     and sell.book.is_fresh(cfg.staleness_sec))
+            if fresh:
+                self._stale_streak = 0
+            else:
+                self._stale_streak += 1
+                if (cfg.max_consecutive_stale
+                        and self._stale_streak >= cfg.max_consecutive_stale):
+                    self._risk_halt(
+                        f"books stale {self._stale_streak} evaluations in a "
+                        f"row (> {cfg.staleness_sec:.0f}s each) — a dead feed "
+                        f"looks exactly like a quiet market")
+                    return None
+            if not fresh:
                 continue
             if not (buy.ready_to_trade() and sell.ready_to_trade()):
                 continue
@@ -569,14 +583,40 @@ class Engine:
         if self.halted:
             return True
         self.halted = True
-        log.critical("HALTED: %s — no further orders. Positions are "
-                     "untouched; flatten manually or restart after checking "
-                     "both venues.", reason)
+        n = self.cfg.halt_flatten_attempts
+        log.critical("HALTED: %s — no NEW arbitrage. %s Check both venues; "
+                     "restart re-reads real positions (strict).", reason,
+                     (f"Will still attempt up to {n} reduce-only hedge(s) to "
+                      f"flatten any imbalance." if n
+                      else "Positions frozen as-is."))
         self._reconcile_evt.set()
         return True
 
+    def _gross_usd(self) -> float:
+        """Total |position x mid| across venues. O(venues), no I/O."""
+        g = 0.0
+        for v in self.venues.values():
+            m = v.book.mid()
+            if m:
+                g += abs(v.position) * m
+        return g
+
     async def _maybe_hedge(self) -> None:
         net = sum(v.position for v in self.venues.values())
+        # After a halt: do NOT open anything new (blocked in _evaluate /
+        # _execute), but DO try to flatten an imbalance that already exists.
+        # Halting because the legs drifted and then refusing to bring them
+        # back together leaves naked exposure through exactly the move that
+        # caused the halt. Bounded so a failing hedge cannot loop.
+        if self.halted:
+            if (abs(net) > self.cfg.net_tolerance_base
+                    and self._halt_flattens < self.cfg.halt_flatten_attempts):
+                self._halt_flattens += 1
+                log.warning("[HALT-FLATTEN %d/%d] reducing naked %+.6g",
+                            self._halt_flattens,
+                            self.cfg.halt_flatten_attempts, net)
+                await self._hedge(net)
+            return
         # B4/G1 (2026-09-04): a hard ceiling on how far the legs may drift.
         # Checked BEFORE hedging, because the failure mode is "hedge keeps
         # failing while the imbalance keeps growing" -- exactly the shape
@@ -591,6 +631,13 @@ class Engine:
             return
         # B4 daily loss floor: session mark-to-market against the baseline
         # taken at first evaluation. O(1) over two venues, no I/O.
+        gross_cap = self.cfg.max_gross_usd
+        if gross_cap > 0:
+            g = self._gross_usd()
+            if g > gross_cap:
+                self._risk_halt(f"gross exposure ${g:,.2f} exceeds "
+                                f"max_gross_usd ${gross_cap:,.2f}")
+                return
         floor = self.cfg.max_daily_loss_usd
         if floor > 0:
             pnl = self.session_pnl()
@@ -829,6 +876,11 @@ class Engine:
             pnl = self.session_pnl()
             rec = (f" | rec {self.recorder.rows_written} rows"
                    if self.recorder else "")
+            if self._stale_streak:
+                rec += f" | stale x{self._stale_streak}"
+            if self.halted and self.cfg.halt_flatten_attempts:
+                rec += (f" | flatten {self._halt_flattens}/"
+                        f"{self.cfg.halt_flatten_attempts}")
             if self._recorder_dead:
                 rec += f" *** RECORDER DEAD: {self._recorder_dead[:60]} ***"
             log.info("[status] %s | prem %s bps (band %+.2f..%+.2f) | pos %s "
