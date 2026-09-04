@@ -23,7 +23,12 @@
 > → 清算風險消失」在那個餘額上不成立。使用者已表示後續會補到 $50。
 > **HL 這邊還多一層**：2026-09-04 查證時 $11.87 **全部在 spot 帳戶**，
 > 而 perp（core）與 **io dex 的清算所都是 $0**——HIP-3 dex 各有各的清算所，
-> 錢要 spot → perp → io 轉兩次才動得了。沒轉之前引擎連單都下不出去。
+> **io dex 與 HL 主場是分開的清算所，錢要分開轉進去**（使用者 2026-09-04
+> 確認，也是 `engine/README.md` 的原話「Fund the dex-specific clearinghouses
+> you trade」）。沒轉之前引擎連單都下不出去。
+> 兩邊介面上都沒找到 spot → io dex 的內部轉帳鈕；最可能跟帳戶類型有關
+> （目前是 Unified Account，而 HL 自己說 `Manual` 才是「各 DEX 餘額分開、
+> 給自動化交易者用」）。**這件事在補資金＋M1 下第一筆單時一起解決，不要猜。**
 > 若決定就用小額，改法在 `docs/RISK_NUMBERS.md` §3：前五列隨帳戶大小線性縮放。
 >
 > **⏰ HL agent wallet 到期日：2026-12-03 13:27 UTC**（90 天，鏈上

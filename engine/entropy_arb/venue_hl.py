@@ -75,7 +75,15 @@ class HLVenue:
         self.equity = None
         self.free = None
         self.start_equity = None
-        self.include_core_equity = True  # cleared when two venues share one account
+        # Whether this leg's equity should include the CORE (dex "") bucket.
+        # HIP-3 clearinghouses are funded separately -- USDC sitting in core
+        # or spot cannot margin an io position until it is transferred in
+        # (confirmed 2026-09-04; engine/README: "Fund the dex-specific
+        # clearinghouses you trade"). So a HIP-3 leg reports only its own
+        # bucket: counting money it cannot use would overstate the equity on
+        # the dashboard. A leg that IS core (dex "") still counts core.
+        # Also cleared when two venues share one HL account (count once).
+        self.include_core_equity = not conf.hl_dex
         self.fee_bps = conf.fee_bps
         self.cap_usd = conf.cap_usd
         self.orders_per_min = conf.orders_per_min
