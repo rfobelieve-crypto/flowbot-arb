@@ -34,6 +34,29 @@ HL_WS_URL = "wss://api.hyperliquid.xyz/ws"   # official ws — the only HL feed 
 HEDGE_VENUES = ("lighter", "lighter-rh", "tradexyz")
 
 
+def _lighter_creds(venue: str):
+    """Credentials for ONE Lighter deployment.
+
+    mainnet and the Robinhood chain are separate accounts with separate API
+    keys (upstream .env.example states this twice). Reading the same
+    LIGHTER_* vars for both was a latent bug: harmless while only one leg was
+    Lighter, fatal for NVDA_LL where BOTH legs are (flow_system TODO 1.08 §7,
+    found by the B1 audit 2026-09-04).
+
+    `LIGHTER_RH_*` overrides for the robinhood chain and falls back to the
+    plain names, so every pre-existing config keeps loading identically.
+    """
+    pre = "LIGHTER_RH_" if venue == "lighter-rh" else "LIGHTER_"
+    idx = _env_i(pre + "ACCOUNT_INDEX")
+    kid = _env_i(pre + "API_KEY_INDEX")
+    key = _env_s(pre + "API_PRIVATE_KEY")
+    if venue == "lighter-rh" and not (idx or kid or key):
+        idx, kid, key = (_env_i("LIGHTER_ACCOUNT_INDEX"),
+                         _env_i("LIGHTER_API_KEY_INDEX"),
+                         _env_s("LIGHTER_API_PRIVATE_KEY"))
+    return LighterCreds(idx, kid, key)
+
+
 @dataclass(frozen=True)
 class LighterProfile:
     name: str
@@ -332,9 +355,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             cap_usd=float(_get(raw, "entropy", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "entropy", "max_orders_per_min", 30)),
             lighter_profile=LIGHTER_PROFILES[entropy_venue],
-            lighter_creds=LighterCreds(_env_i("LIGHTER_ACCOUNT_INDEX"),
-                                       _env_i("LIGHTER_API_KEY_INDEX"),
-                                       _env_s("LIGHTER_API_PRIVATE_KEY")),
+            lighter_creds=_lighter_creds(entropy_venue),
             lighter_venue=entropy_venue,
         )
     elif entropy_venue != "hl":
@@ -364,9 +385,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             cap_usd=float(_get(raw, "hedge", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "hedge", "max_orders_per_min", 30)),
             lighter_profile=LIGHTER_PROFILES[hedge_venue],
-            lighter_creds=LighterCreds(_env_i("LIGHTER_ACCOUNT_INDEX"),
-                                       _env_i("LIGHTER_API_KEY_INDEX"),
-                                       _env_s("LIGHTER_API_PRIVATE_KEY")),
+            lighter_creds=_lighter_creds(hedge_venue),
             lighter_venue=hedge_venue,
         )
 
