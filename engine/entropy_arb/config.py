@@ -215,6 +215,14 @@ class Config:
     reconcile_sec: float
     venue_probe_sec: float
     http_keepalive_sec: float
+    # B5 control channel. Credentials come from .env like every other
+    # secret; they are never logged.
+    control_enabled: bool
+    control_command_file: str
+    control_poll_sec: float
+    control_notify_critical: bool
+    tg_bot_token: Optional[str]
+    tg_chat_id: Optional[str]
     # recorder
     recorder_enabled: bool
     recorder_csv: str
@@ -304,6 +312,14 @@ _SCHEMA: Dict[str, Any] = {
         "reconcile_sec": float,
         "venue_probe_sec": float,
         "http_keepalive_sec": float,
+    },
+    # B5 control channel (2026-09-04): four verbs, out of band. It never
+    # places an order, never changes a threshold, and never lifts a HALT.
+    "control": {
+        "enabled": bool,
+        "command_file": str,
+        "poll_sec": float,
+        "notify_critical": bool,
     },
     "recorder": {
         "enabled": bool,
@@ -587,6 +603,14 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         reconcile_sec=float(_get(raw, "execution", "reconcile_sec", 15.0)),
         venue_probe_sec=float(_get(raw, "execution", "venue_probe_sec", 30.0)),
         http_keepalive_sec=float(_get(raw, "execution", "http_keepalive_sec", 10.0)),
+        control_enabled=bool(_get(raw, "control", "enabled", True)),
+        control_command_file=str(_get(raw, "control", "command_file",
+                                      "control.cmd")),
+        control_poll_sec=float(_get(raw, "control", "poll_sec", 2.0)),
+        control_notify_critical=bool(_get(raw, "control", "notify_critical",
+                                          True)),
+        tg_bot_token=_env_s("ARB_TG_BOT_TOKEN"),
+        tg_chat_id=_env_s("ARB_TG_CHAT_ID"),
         recorder_enabled=bool(_get(raw, "recorder", "enabled", True)),
         recorder_csv=_get(raw, "recorder", "csv", "logs/minutes.csv"),
         log_level=str(_get(raw, "logging", "level", "INFO")).upper(),

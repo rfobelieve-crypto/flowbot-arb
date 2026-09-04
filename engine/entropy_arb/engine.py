@@ -70,6 +70,14 @@ class Engine:
         self._venue_locks: Dict[str, asyncio.Lock] = {}
         self._exec_tasks: set = set()
         self.halted = False
+        # B5: operator pause is NOT a halt. It stops opening; it never stops
+        # hedging, flattening, self-rescue or reconcile, and it is reversible
+        # from the control channel. `halted` is not.
+        self.paused_by_operator = False
+        self.pause_source = ""
+        self.flatten_request = False
+        self._flatten_evt = asyncio.Event()
+        self.control = None
         self._recorder_dead: Optional[str] = None   # G5: sidecar liveness
         self._stale_streak = 0            # B4: consecutive stale evaluations
         # self-rescue state: consecutive flatten attempts that made NO
@@ -154,6 +162,7 @@ class Engine:
         self.stop.set()
         self._update_evt.set()
         self._reconcile_evt.set()
+        self._flatten_evt.set()
 
     # ------------------------------------------------------------- lifecycle
 
@@ -274,6 +283,24 @@ class Engine:
         if live:
             tasks.append(asyncio.create_task(self._reconcile_loop(),
                                              name="reconcile"))
+            tasks.append(asyncio.create_task(self._flatten_loop(),
+                                             name="flatten"))
+            if cfg.control_enabled:
+                from .control import ControlChannel, make_relay
+                self.control = ControlChannel(self, cfg)
+                if cfg.control_notify_critical:
+                    # Every guard in this engine shouts at CRITICAL. Relaying
+                    # those to the same channel is the difference between a
+                    # switch that fired and a switch you find out about
+                    # tomorrow.
+                    self.control.relay = make_relay()
+                    logging.getLogger().addHandler(self.control.relay)
+                tasks.append(asyncio.create_task(
+                    self.control.run(self.stop), name="control"))
+                log.info("control channel: %s + command file %s",
+                         "telegram" if cfg.tg_bot_token and cfg.tg_chat_id
+                         else "NO telegram credentials",
+                         cfg.control_command_file)
 
         await self.stop.wait()
         if self._exec_tasks:  # let in-flight executions settle, never cancel
@@ -402,6 +429,11 @@ class Engine:
                 "unchanged. / 波动熔断：暂停开新仓 %.0f 秒；对冲、平仓、"
                 "自救与对帐不受影响。", tripped, cfg.vol_cooldown_sec,
                 cfg.vol_cooldown_sec)
+        if self.paused_by_operator:
+            self._skiplog("paused by %s — opening nothing; hedging, "
+                          "flattening and reconcile continue",
+                          self.pause_source or "operator")
+            return
         if self.vol.paused(now):
             left = self.vol.remaining(now)
             self._skiplog("volatility pause: %.0fs left — %s", left,
@@ -1008,6 +1040,10 @@ class Engine:
             return "shutdown"
         if self.halted:
             return "engine halted — no new exposure"
+        if self.flatten_request:
+            return "flatten requested"
+        if self.paused_by_operator:
+            return f"paused by {self.pause_source or 'operator'}"
         if self.vol.paused(now):
             # A quote left resting through a fast move is the definition of
             # being picked off: our price is the one that stopped updating.
@@ -1232,6 +1268,196 @@ class Engine:
             if n:
                 log.critical("[%s] cancelled %d pre-existing resting order(s) "
                              "before start", v.name, n)
+
+    # ---------------------------------------------------------- control (B5)
+    #
+    # Four verbs, applied from outside the process (entropy_arb/control.py).
+    # The methods below are the whole surface the channel may touch: flags
+    # and a flatten request. It cannot place an order, change a threshold, or
+    # clear `halted` -- a halt needs a restart, because a restart is what
+    # re-reads real positions with strict=True.
+
+    def set_operator_pause(self, on: bool, source: str) -> None:
+        """pause / resume. Stops NEW exposure only: hedging, flattening,
+        self-rescue and reconcile are untouched, and no position is closed."""
+        if self.paused_by_operator == on:
+            return                                   # idempotent
+        self.paused_by_operator = on
+        self.pause_source = source if on else ""
+        log.critical("OPERATOR %s (%s) — %s / 操作员%s",
+                     "PAUSE" if on else "RESUME", source,
+                     "no new exposure; hedging and reconcile continue"
+                     if on else "opening new exposure again",
+                     "暂停开新仓（对冲与对帐照常）" if on else "恢复开仓")
+        self._update_evt.set()
+
+    def request_flatten(self) -> None:
+        """flat: close everything, keep running.
+
+        Implies a pause, and the pause OUTLIVES the flatten. Re-opening the
+        moment the position is closed would undo the operator's instruction
+        within one evaluation, so the engine waits for an explicit resume.
+        """
+        self.flatten_request = True
+        self.set_operator_pause(True, "flatten")
+        self._flatten_evt.set()
+        log.critical("OPERATOR FLAT requested — positions will be VERIFIED "
+                     "against the venues first, then closed reduce-only; the "
+                     "engine stays paused afterwards / 平仓请求：先对帐核实"
+                     "真实持仓再平，平完仍保持暂停")
+
+    def describe_positions(self) -> str:
+        return (" ".join(f"{v.name}={v.position:+.6g}"
+                         for v in self.venues.values())
+                + f" net={sum(v.position for v in self.venues.values()):+.6g}")
+
+    def control_status(self) -> str:
+        """One screen of truth for the phone. Read-only."""
+        cfg = self.cfg
+        now = time.time()
+        pnl = self.session_pnl()
+        bits = [
+            f"{cfg.symbol} entropy/{cfg.hedge_venue} mode={cfg.mode}",
+            self.describe_positions(),
+            f"MTM {'$%+.4f' % pnl if pnl is not None else '—'} | "
+            f"trades {self.trades} hedges {self.hedges}",
+        ]
+        state = []
+        if self.halted:
+            state.append("HALTED (restart required)")
+        if self.paused_by_operator:
+            state.append(f"PAUSED by {self.pause_source}")
+        if self.flatten_request:
+            state.append("FLATTENING")
+        if self.vol.paused(now):
+            state.append(f"VOL-PAUSE {self.vol.remaining(now):.0f}s "
+                         f"({self.vol.reason})")
+        if self._venue_down:
+            state.append("DOWN: " + ",".join(self._venue_down))
+        for o in self._maker_open.values():
+            state.append("RESTING " + o.describe())
+        if self._recorder_dead:
+            state.append("RECORDER DEAD")
+        bits.append("state: " + ("; ".join(state) if state else "trading"))
+        for v in self.venues.values():
+            bits.append(f"{v.name} book {v.book.best_bid() or '—'}/"
+                        f"{v.book.best_ask() or '—'}"
+                        + ("" if v.book.is_fresh(cfg.staleness_sec)
+                           else " STALE"))
+        return "\n".join(bits)
+
+    async def _flatten_step(self) -> bool:
+        """One pass at closing every position. Returns True when flat.
+
+        Sibling of _hedge(): same guards, different target. _hedge drives the
+        NET to zero (the legs should cancel); this drives EACH LEG to zero
+        (the operator wants out). Both are reduce-only and price-protected,
+        and both refuse to act on a venue that is unreachable or blind.
+        """
+        cfg = self.cfg
+        slip = cfg.hedge_slippage_bps / 1e4
+        flat = True
+        for v in self.venues.values():
+            if abs(v.position) <= cfg.net_tolerance_base:
+                continue
+            flat = False
+            if v.key in self._venue_down:
+                log.warning("[FLAT] %s unreachable — retrying", v.name)
+                continue
+            if not v.book.is_fresh(cfg.staleness_sec):
+                log.warning("[FLAT] %s book stale — will not close blind",
+                            v.name)
+                continue
+            lk = self._vlock(v.key)
+            if lk.locked():
+                continue
+            is_sell = v.position > 0
+            qty = floor_step(abs(v.position), self._step)
+            if qty < v.min_base:
+                continue
+            ref = v.book.best_bid() if is_sell else v.book.best_ask()
+            if ref is None:
+                continue
+            limit = (v.px_round(ref * (1 - slip), False) if is_sell
+                     else v.px_round(ref * (1 + slip), True))
+            if qty * limit < v.min_quote:
+                log.warning("[FLAT] %s residual %.6g is below the venue "
+                            "minimum — cannot be closed by order", v.name, qty)
+                continue
+            await lk.acquire()
+            try:
+                log.critical("[FLAT] %s %.6g on %s @%.6g",
+                             "SELL" if is_sell else "BUY", qty, v.name, limit)
+                self._record_send(v)   # counts toward the budget, never blocked
+                info = await v.send_taker(is_buy=not is_sell, qty=qty,
+                                          limit_px=limit, reduce_only=True)
+                if info.get("err") or info.get("unresolved"):
+                    log.error("[FLAT] %s: %s", v.name,
+                              info.get("err") or "unresolved")
+                    if str(info.get("err", "")).startswith("RATE_LIMITED"):
+                        self._mark_limited(v)
+                    self._reconcile_evt.set()
+                else:
+                    fill = info["filled_base"]
+                    v.position += -fill if is_sell else fill
+                    if fill:
+                        px = info.get("avg_px") or limit
+                        fee = v.fee_bps / 1e4
+                        v.cash += (fill * px * (1 - fee) if is_sell
+                                   else -fill * px * (1 + fee))
+                        v.volume_usd += fill * px
+                    log.info("[FLAT SETTLED] %s %s %.6g/%.6g", v.name,
+                             info["status"], fill, qty)
+                v.last_traded_ts = time.time()
+            finally:
+                lk.release()
+        return flat
+
+    async def _flatten_loop(self) -> None:
+        """Owns the `flat` verb. Never gives up on its own -- only the
+        operator or a shutdown ends it."""
+        first = True
+        while not self.stop.is_set():
+            await self._flatten_evt.wait()
+            if self.stop.is_set():
+                break
+            if first:
+                # The scar rule (mistake.md 2026-06-07): anything that
+                # changes real exchange state checks the real exchange
+                # first. Flattening a position we only believe we have is
+                # how you create an orphan.
+                try:
+                    await self._reconcile_positions(hedge=False)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("[FLAT] pre-flatten reconcile failed — "
+                                  "closing on the last known positions")
+                first = False
+            try:
+                done = await self._flatten_step()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("[FLAT] step failed")
+                done = False
+            if done:
+                self._flatten_evt.clear()
+                self.flatten_request = False
+                first = True
+                log.critical("FLAT COMPLETE: %s — the engine stays PAUSED; "
+                             "send resume to trade again / 平仓完成，引擎维持"
+                             "暂停，需 resume 才会恢复开仓",
+                             self.describe_positions())
+                await self.notify("flat complete: " + self.describe_positions()
+                                  + "\nthe engine stays paused — /resume to "
+                                    "trade again")
+                continue
+            await asyncio.sleep(1.0)
+
+    async def notify(self, text: str) -> None:
+        if self.control is not None:
+            await self.control.notify(text)
 
     # Risk switches that must be explicitly chosen before real money moves.
     # None has a defensible universal default -- the dollar ones depend on
@@ -1656,6 +1882,10 @@ class Engine:
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
                     rec += f" | *** UNRESOLVED CANCELS x{self.maker_unknown} ***"
+            if self.paused_by_operator:
+                rec += f" | PAUSED({self.pause_source})"
+            if self.flatten_request:
+                rec += " | *** FLATTENING ***"
             if self.vol.paused(time.time()):
                 rec += (f" | *** VOL-PAUSE {self.vol.remaining(time.time()):.0f}s"
                         f" ({self.vol.reason}) ***")

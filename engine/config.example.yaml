@@ -60,6 +60,33 @@ hedge:
   max_position_usd: 1000
   max_orders_per_min: 30     # Lighter's ceiling is ~40/min / Lighter 上限约 40/分钟
 
+# ==================== CONTROL CHANNEL / 控制通道 ===========================
+# B5 (2026-09-04). Four verbs, applied from OUTSIDE the process:
+#   /pause   stop opening new exposure. Hedging, flattening, self-rescue and
+#            reconcile continue, and no position is closed.
+#   /resume  lift the pause. It CANNOT lift a HALT — a halt needs a restart,
+#            because the restart is what re-reads real positions strictly.
+#   /flat    close everything and STAY paused. Positions are verified against
+#            the venues BEFORE anything is closed.
+#   /status  read-only.
+# Every verb is idempotent. The channel does not go through the dashboard,
+# because it has to work on the day the dashboard is what broke: Telegram
+# (credentials in .env) plus a command file you can echo into over SSH.
+# 四个动词，进程外下达，每个都幂等：pause 只停开仓不平仓；resume 不能解除
+# HALT；flat 先对帐核实真实持仓再平，平完仍保持暂停；status 只读。
+# 不经过仪表板——仪表板挂掉的那天它必须还能用。
+control:
+  enabled: true
+  # one verb per line; the file is emptied as it is read, so a stale verb
+  # cannot re-fire after a restart / 一行一个动词，读完即清空
+  command_file: control.cmd
+  poll_sec: 2.0
+  # relay CRITICAL log lines (HALT, self-rescue, unresolved maker orders,
+  # volatility pauses) to the same channel — the difference between a guard
+  # that fired and a guard you find out about tomorrow
+  # 把 CRITICAL 日志转发到同一个通道：守卫触发了要当场看得见
+  notify_critical: true
+
 # ========================= SIZING / 下单规模 ===============================
 sizing:
   take_fraction: 0.5           # fraction of crossable depth to take / 吃掉可套利深度的比例
