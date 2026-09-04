@@ -1,0 +1,16 @@
+# 憑證：永不進 git。交易金鑰只存在跑引擎的那台機器上。
+.env
+*.key
+engine/config.yaml
+
+# 執行時產物：logs 是 320M 的分鐘/掃描 CSV
+engine/logs/
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
