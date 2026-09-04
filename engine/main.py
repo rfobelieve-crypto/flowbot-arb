@@ -53,8 +53,8 @@ def setup_logging(level: str, log_file: str = None,
 
 
 async def amain(cfg, record_only: bool, use_dashboard: bool, force_tty: bool,
-                log_buffer, lang: str) -> None:
-    eng = Engine(cfg, record_only=record_only)
+                log_buffer, lang: str, shadow: bool = False) -> None:
+    eng = Engine(cfg, record_only=record_only, shadow=shadow)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -99,6 +99,12 @@ def main() -> None:
     p.add_argument("--record-only", action="store_true",
                    help="only collect minute data, run no strategy, send no "
                         "orders (needs no credentials)")
+    p.add_argument("--shadow", action="store_true",
+                   help="run the FULL strategy and send nothing: every "
+                        "decision goes to logging.shadow_csv. Not a paper "
+                        "mode — no fills are simulated and no PnL is claimed. "
+                        "The step between --record-only and real money / "
+                        "影子模式：策略照跑一张单都不送，不模拟成交")
     p.add_argument("--cn", action="store_true",
                    help="display the dashboard in Chinese / 仪表盘使用中文")
     disp = p.add_mutually_exclusive_group()
@@ -107,6 +113,11 @@ def main() -> None:
     disp.add_argument("--no-dashboard", action="store_true",
                       help="plain console logs instead of the dashboard")
     args = p.parse_args()
+    if args.shadow and args.record_only:
+        print("--shadow and --record-only are different things: record-only "
+              "runs no strategy at all, shadow runs all of it and sends "
+              "nothing. Pick one.", file=sys.stderr)
+        sys.exit(2)
 
     try:
         cfg = load_config(args.config, args.env_file,
@@ -139,7 +150,8 @@ def main() -> None:
         asyncio.run(amain(cfg, record_only=args.record_only,
                           use_dashboard=use_dashboard, force_tty=force_tty,
                           log_buffer=log_buffer,
-                          lang="zh" if args.cn else "en"))
+                          lang="zh" if args.cn else "en",
+                          shadow=args.shadow))
     except RuntimeError as e:
         # startup failures (missing credentials, market not found, venue
         # unreachable) — a clean message, not a traceback

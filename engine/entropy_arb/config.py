@@ -238,6 +238,7 @@ class Config:
     status_interval_sec: float
     trades_csv: str
     maker_csv: str
+    shadow_csv: str
     dashboard: bool
     log_file: str
     # runtime
@@ -338,6 +339,7 @@ _SCHEMA: Dict[str, Any] = {
         "status_interval_sec": float,
         "trades_csv": str,
         "maker_csv": str,
+        "shadow_csv": str,
         "dashboard": bool,
         "file": str,
     },
@@ -472,6 +474,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     trades_csv = _get(raw, "logging", "trades_csv", "logs/trades.csv")
     maker_csv = _get(raw, "logging", "maker_csv", None) or os.path.join(
         os.path.dirname(trades_csv), "maker.csv")
+    shadow_csv = _get(raw, "logging", "shadow_csv", None) or os.path.join(
+        os.path.dirname(trades_csv), "shadow.csv")
 
     vol_window_sec = float(_get(raw, "risk", "vol_window_sec", 30.0))
     vol_max_move_bps = float(_get(raw, "risk", "vol_max_move_bps", 0.0))
@@ -628,6 +632,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         status_interval_sec=float(_get(raw, "logging", "status_interval_sec", 30.0)),
         trades_csv=trades_csv,
         maker_csv=maker_csv,
+        shadow_csv=shadow_csv,
         dashboard=bool(_get(raw, "logging", "dashboard", True)),
         log_file=_get(raw, "logging", "file", "logs/engine.log"),
     )

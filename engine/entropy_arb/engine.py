@@ -49,13 +49,25 @@ MAKER_CSV_HEADER = ["ts", "direction", "maker_venue", "hedge_venue", "side",
                     "edge_bps", "exp_edge_usd", "fill_edge_usd", "rest_ms",
                     "first_fill_ms", "hedge_ms", "cancel_ms",
                     "cancel_attempts", "cancel_reason", "mid_at_fill"]
+# Shadow mode (2026-09-04). NOT a paper mode: the README's "there is no paper
+# mode -- validate with recorded data and tiny position caps, not with
+# simulated fills" still stands, and nothing here simulates a fill, a position
+# or a PnL. It records the DECISION and stops at the send boundary, which is
+# the one step between --record-only (no strategy at all) and real money.
+SHADOW_CSV_HEADER = ["ts", "action", "direction", "venue", "other_venue",
+                     "side", "qty", "px", "notional", "edge_bps",
+                     "exp_edge_usd", "note"]
 BALANCE_POLL_SEC = 30.0
 
 
 class Engine:
-    def __init__(self, cfg: Config, record_only: bool = False) -> None:
+    def __init__(self, cfg: Config, record_only: bool = False,
+                 shadow: bool = False) -> None:
         self.cfg = cfg
         self.record_only = record_only
+        # Shadow: run the whole strategy, send nothing. See SHADOW_CSV_HEADER.
+        self.shadow = shadow
+        self.shadow_decisions = 0
         self.session: Optional[aiohttp.ClientSession] = None
         self.entropy = None
         self.hedge = None
@@ -192,7 +204,17 @@ class Engine:
         self.markets_ready = True
 
         live = not self.record_only
-        if live:
+        if live and self.shadow:
+            # A rehearsal that cannot start is not a rehearsal, so shadow
+            # warns where live refuses -- but it says exactly what live would
+            # have refused on, because finding that out at go-live is the
+            # failure this mode exists to prevent.
+            try:
+                self._require_armed_risk_block()
+            except RuntimeError as e:
+                log.warning("[SHADOW] live would REFUSE to start — %s",
+                            str(e).replace(chr(10), " | "))
+        elif live:
             self._require_armed_risk_block()
             if not cfg.creds_complete:
                 raise RuntimeError(
@@ -204,6 +226,12 @@ class Engine:
             self.hedge.init_signer()
             if self.hedge.kind == "hl":
                 self.entropy.share_nonces_with(self.hedge)
+        if live and self.shadow:
+            log.warning("SHADOW — the full strategy runs and NOTHING is sent. "
+                        "No fills are simulated, no positions are invented, no "
+                        "PnL is claimed: decisions go to %s and that is all. / "
+                        "影子模式：策略照跑，一张单都不送；不模拟成交、不虚构"
+                        "持仓、不宣称损益。", cfg.shadow_csv)
         if (self.hedge.kind == "hl"
                 and self.entropy._query_address()
                 and self.entropy._query_address() == self.hedge._query_address()):
@@ -225,6 +253,15 @@ class Engine:
         if self.record_only:
             log.warning("RECORD-ONLY — collecting minute data, no strategy, "
                         "no orders")
+        elif self.shadow:
+            # Read real positions if the credentials happen to be there --
+            # it proves the read path works -- but never insist, and never
+            # touch the book with a cancel sweep.
+            try:
+                await self._reconcile_positions(hedge=False)
+            except Exception as e:                              # noqa: BLE001
+                log.warning("[SHADOW] could not read starting positions "
+                            "(%r) — continuing with zero", e)
         else:
             log.warning("LIVE — real orders will be sent (use --record-only "
                         "for credential-less data collection)")
@@ -505,7 +542,7 @@ class Engine:
                     return None
             if not fresh:
                 continue
-            if not (buy.ready_to_trade() and sell.ready_to_trade()):
+            if not (self._ready(buy) and self._ready(sell)):
                 continue
             if self._venue_down:
                 continue  # a venue in outage pauses the (only) pair
@@ -584,6 +621,11 @@ class Engine:
         slip = cfg.leg_slippage_bps / 1e4
         buy_bound = buy.px_round(plan.buy_limit * (1 + slip), round_up=False)
         sell_bound = sell.px_round(plan.sell_limit * (1 - slip), round_up=True)
+        if self._blocked("arb", buy, other=sell, side="BUY+SELL", qty=plan.qty,
+                         px=plan.buy_limit, edge_bps=plan.marginal_premium_bps,
+                         exp_edge_usd=plan.exp_edge_usd, note=direction):
+            self.last_trade_ts = time.time()
+            return False
         self._record_send(buy)
         self._record_send(sell)
         res = await asyncio.gather(
@@ -729,7 +771,7 @@ class Engine:
                     f"(> {cfg.staleness_sec:.0f}s each) — a dead feed looks "
                     f"exactly like a quiet market")
             return None
-        if not (maker_v.ready_to_trade() and taker_v.ready_to_trade()):
+        if not (self._ready(maker_v) and self._ready(taker_v)):
             return None
         if self._venue_down:
             return None
@@ -835,6 +877,12 @@ class Engine:
                  dkey, "BUY" if order.is_buy else "SELL", plan.qty,
                  plan.maker_px, maker_v.name, taker_v.name, plan.hedge_limit,
                  plan.edge_bps, plan.exp_edge_usd, plan.hedge_depth)
+        if self._blocked("quote", maker_v, other=taker_v,
+                         side="BUY" if order.is_buy else "SELL", qty=plan.qty,
+                         px=plan.maker_px, edge_bps=plan.edge_bps,
+                         exp_edge_usd=plan.exp_edge_usd, note=dkey):
+            order.apply("canceled")     # nothing rested; retire it cleanly
+            return
         try:
             async with self._vlock(maker_v.key):
                 self._record_send(maker_v)
@@ -1137,6 +1185,9 @@ class Engine:
             return
         limit = (taker_v.px_round(ref * (1 + slip), True) if is_buy
                  else taker_v.px_round(ref * (1 - slip), False))
+        if self._blocked("quote-hedge", taker_v, side="BUY" if is_buy else "SELL",
+                         qty=qty, px=limit):
+            return
         t0 = time.time()
         try:
             async with self._vlock(taker_v.key):
@@ -1385,6 +1436,9 @@ class Engine:
                 log.warning("[FLAT] %s residual %.6g is below the venue "
                             "minimum — cannot be closed by order", v.name, qty)
                 continue
+            if self._blocked("flat", v, side="SELL" if is_sell else "BUY",
+                             qty=qty, px=limit):
+                continue
             await lk.acquire()
             try:
                 log.critical("[FLAT] %s %.6g on %s @%.6g",
@@ -1510,6 +1564,35 @@ class Engine:
         self._recorder_dead = repr(exc)
         log.critical("RECORDER DIED: %r — trading continues but minute data "
                      "is NO LONGER being written", exc)
+
+    # ----------------------------------------------------------- shadow (B?)
+
+    def _ready(self, v) -> bool:
+        """Shadow needs books, not signers."""
+        return self.shadow or v.ready_to_trade()
+
+    def _blocked(self, action: str, v, *, other=None, side: str = "",
+                 qty: float = 0.0, px: float = 0.0, edge_bps=None,
+                 exp_edge_usd=None, note: str = "") -> bool:
+        """The send boundary. True when nothing may leave this process.
+
+        Every path that can put an order on an exchange asks this first, so
+        "shadow sends nothing" is one fact in one place rather than six
+        promises spread over the file.
+        """
+        if not self.shadow:
+            return False
+        self.shadow_decisions += 1
+        log.warning("[SHADOW] %s %s %s %.6g @%.6g%s — NOT SENT",
+                    action, v.name if v is not None else "-", side, qty, px,
+                    f" | edge {edge_bps:.2f}bps" if edge_bps is not None else "")
+        self._append_csv(self.cfg.shadow_csv, SHADOW_CSV_HEADER, [
+            f"{time.time():.3f}", action, note, v.name if v is not None else "",
+            other.name if other is not None else "", side,
+            f"{qty:.8g}", f"{px:.8g}", f"{qty * px:.2f}",
+            f"{edge_bps:.3f}" if edge_bps is not None else "",
+            f"{exp_edge_usd:.4f}" if exp_edge_usd is not None else "", note])
+        return True
 
     def _risk_halt(self, reason: str) -> bool:
         """One place where every hard stop is raised. Constant cost, no I/O.
@@ -1657,6 +1740,9 @@ class Engine:
                 else v.px_round(ref * (1 + slip), True)
             if qty * limit < max(cfg.min_order_notional, v.min_quote):
                 continue
+            if self._blocked("hedge", v, side="SELL" if is_sell else "BUY",
+                             qty=qty, px=limit, note=f"net {net:+.6g}"):
+                return
             await lk.acquire()  # verified free, no awaits since: fast path
             try:
                 log.warning("[HEDGE] net %+.6g — %s %.6g on %s @%.6g",

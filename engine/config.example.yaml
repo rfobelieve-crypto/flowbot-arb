@@ -172,6 +172,12 @@ logging:
   # Defaults to maker.csv beside trades_csv.
   # 挂单执行单独记一份：挂单存活时间、成交/撤单、撤单延迟、对冲延迟。
   maker_csv: logs/maker.csv
+  # --shadow writes every decision it did NOT send here. Shadow is the step
+  # between --record-only (no strategy at all) and real money; it is NOT a
+  # paper mode — no fill is simulated, no position invented, no PnL claimed.
+  # 影子模式把「本来会送出的每一个决定」写在这里。它不是模拟盘：不模拟成交、
+  # 不虚构持仓、不宣称损益。
+  shadow_csv: logs/shadow.csv
   dashboard: true
   file: logs/engine.log
 
