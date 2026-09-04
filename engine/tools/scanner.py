@@ -20,7 +20,7 @@ stocks) and on each other.  Same underlying, different books = the same
 question this line already asks, on instruments that are not crypto.
 
 Three things this version adds, all COLLECTION-side (the promotion metric in
-flow_system research/arb/scan_rank.py is untouched and stays frozen):
+arblib/scan_rank.py in this repo is untouched and stays frozen):
   1. venues = HL core + EVERY builder dex + both Lighter chains
   2. pairs = every canonical ticker carried by >= 2 venues, including
      HL-dex vs HL-dex (same chain, no bridge — a materially easier trade)
@@ -35,7 +35,7 @@ flow_system research/arb/scan_rank.py is untouched and stays frozen):
 Pair names keep their v1 spelling for the venues that existed then
 ("BTC@HL-lighter", "ANTH@IO-lighter") so their history stays one series.
 
-This file only COLLECTS.  Ranking lives in flow_system research/arb/
+This file only COLLECTS.  Ranking lives in arblib/
 scan_rank.py with a metric frozen before this scanner produced its first row.
 
 v4 (2026-09-03) - CEX LEGS. The operator holds a 50% fee rebate on OKX and

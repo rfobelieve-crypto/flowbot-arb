@@ -29,7 +29,7 @@ Credentials (read-only keys are enough; put them in flow_system/.env):
   BINANCE_API_KEY / BINANCE_API_SECRET
 A venue with no credentials is skipped with one line, never a crash.
 
-Run: python research/arb/fee_receipts.py [--hours 48]
+Run: python arblib/fee_receipts.py [--hours 48]
 Out: results/arb_fee_receipts.json
 """
 from __future__ import annotations

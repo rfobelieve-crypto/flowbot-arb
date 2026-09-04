@@ -39,7 +39,7 @@ window-specific p90 as its band and score it on rows from today forward.
 Fees are the no-rebate schedule via fees.py (the question is whether the
 line can live WITHOUT the promotion).
 
-Run: python research/arb/session_window.py
+Run: python arblib/session_window.py
 Out: results/arb_session_window.json
 """
 from __future__ import annotations

@@ -39,7 +39,7 @@ PRE-REGISTERED PREDICTIONS (written before the run)
 SURVIVAL: all three -> forward clock on rows from today; else the idea stays
 a note. Exploration on the selection window only; nothing here is a verdict.
 
-Run: python research/arb/hold_carry.py
+Run: python arblib/hold_carry.py
 Out: results/arb_hold_carry.json
 """
 from __future__ import annotations

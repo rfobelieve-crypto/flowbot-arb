@@ -48,7 +48,7 @@ reappearing after a failed fetch. The detector now labels those
 mass_reappear and this script reads only `listed`. Without that fix every
 number below would be noise.
 
-Run: python research/arb/listing_window.py
+Run: python arblib/listing_window.py
 Out: results/arb_listing_window.json
 """
 from __future__ import annotations

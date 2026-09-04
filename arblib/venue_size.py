@@ -44,7 +44,7 @@ EXCLUSIONS, frozen here
 This decides ONE thing: whether to re-point the recording family at
 big-vs-small pairs. It is not a verdict and opens no clock.
 
-Run: python research/arb/venue_size.py
+Run: python arblib/venue_size.py
 Out: results/arb_venue_size.json
 """
 from __future__ import annotations

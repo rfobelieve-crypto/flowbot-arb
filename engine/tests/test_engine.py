@@ -50,6 +50,13 @@ class StubVenue:
 
 
 def make_engine(**thr):
+    # Python 3.9: asyncio.Event() in Engine.__init__ needs a current loop,
+    # and a preceding asyncio.run() in this file leaves the main thread
+    # with none. The engine itself always runs inside asyncio.run().
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
     cfg = make_cfg(**thr)
     eng = Engine(cfg)
     eng.entropy = StubVenue("entropy", "ENTROPY")

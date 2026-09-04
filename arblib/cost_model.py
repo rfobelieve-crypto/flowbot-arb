@@ -33,8 +33,8 @@ What is measurable from data we already record (2026-09-04):
 Not yet measurable (needs a live account or a decision): margin rates per
 venue, hurdle rate, transfer delays, tail probabilities. Those are ASSUMED.
 
-Run: python research/arb/cost_model.py            # family breakdown
-     python research/arb/cost_model.py --size 500  # at a given order size
+Run: python arblib/cost_model.py            # family breakdown
+     python arblib/cost_model.py --size 500  # at a given order size
 """
 from __future__ import annotations
 
