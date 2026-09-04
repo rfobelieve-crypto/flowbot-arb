@@ -141,7 +141,14 @@ elif self._current_trade_profitability - self._tx_cost_pct > self.config.max_pro
 **你自己**才是那個過期的報價，你正要被人挑走。
 
 我們只有下限 `threshold_bps`，**沒有上限**。而對這條線這不是理論風險——
-標的是代幣化股票，我們自己就有兩個（`io:OAI`、`io:EWY`）在錄製途中下市。
+標的是代幣化股票，我們自己就有兩個在錄製途中下市。
+
+> **更正（2026-09-04 晚，查 HL `meta` dex=io）**：下市的兩個是
+> **`io:IONQ` 與 `io:EWY`**，不是 OAI。`io:OAI` 現在**在市**且有量
+> （entropy.io 顯示 24h $5.33M）。`logs/OAI_delisted_20260830/` 這個目錄名
+> 是當時的誤判，或 OAI 下市後又復牌——**沒有查證前不要當成事實**。
+> io dex 目前 7 個標的：上市 OAI／ANTH／SNDK／NBIS／GPRO，下市 IONQ／EWY。
+> **論點不變**（我們確實有標的在錄製途中下市），只是例子點錯了名字。
 **停牌／下市的標的留下的是又寬又舊、而且 REST 還會照常回應的簿口，
 讀起來就是巨大溢價。** `premium_persist_sec` 擋得掉一跳的假訊號，
 擋不掉「持續是錯的」簿口。
