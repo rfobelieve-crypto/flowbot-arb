@@ -106,3 +106,12 @@ logging:
   trades_csv: logs/trades.csv
   dashboard: true
   file: logs/engine.log
+
+# B4/G1 risk switch (2026-09-04): largest |legA + legB| the engine may carry
+# before it HALTS outright. The two legs are supposed to cancel; if they stop
+# cancelling, the trade is no longer an arbitrage. Default = 3x
+# execution.net_tolerance_base. Set 0 to disable (not recommended live).
+# 两条腿本应相互抵消；差额超过此值即整机停止下单。默认 = 3 倍
+# execution.net_tolerance_base；设 0 关闭（实盘不建议）。
+risk:
+  max_net_base: 0.003

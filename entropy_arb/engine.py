@@ -487,6 +487,15 @@ class Engine:
         buy.last_traded_ts = sell.last_traded_ts = time.time()
 
         unresolved = binfo.get("unresolved") or sinfo.get("unresolved")
+        # B1 audit G2 (2026-09-04): on an unresolved outcome filled_base is a
+        # GUESS (send_taker returns 0.0 on settle timeout), so the local
+        # position written above may be wrong until reconcile reads the
+        # chain. Say so loudly; the reconcile triggered by the caller is what
+        # repairs it. Never let a guessed fill look like a fact.
+        if unresolved:
+            log.warning("[UNRESOLVED] local positions may be stale until "
+                        "reconcile (buy %s / sell %s)",
+                        binfo.get("status"), sinfo.get("status"))
         hard_err = (binfo.get("err") is not None
                     or sinfo.get("err") is not None)
         rate_limited = False
@@ -530,6 +539,22 @@ class Engine:
 
     async def _maybe_hedge(self) -> None:
         net = sum(v.position for v in self.venues.values())
+        # B4/G1 (2026-09-04): a hard ceiling on how far the legs may drift.
+        # Checked BEFORE hedging, because the failure mode is "hedge keeps
+        # failing while the imbalance keeps growing" -- exactly the shape
+        # that has to stop by itself rather than be noticed by a human.
+        # HALT is one-way: it needs a restart, and a restart re-reads the
+        # real positions with strict=True.
+        cap = self.cfg.max_net_base
+        if cap > 0 and abs(net) > cap and not self.halted:
+            self.halted = True
+            log.critical("HALTED: net imbalance %+.6g exceeds max_net_base "
+                         "%.6g — the legs are no longer hedging each other. "
+                         "No further orders. Positions are untouched; "
+                         "flatten manually or restart after checking both "
+                         "venues.", net, cap)
+            self._reconcile_evt.set()
+            return
         if abs(net) > self.cfg.net_tolerance_base:
             await self._hedge(net)
 

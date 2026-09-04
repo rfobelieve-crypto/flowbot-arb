@@ -142,6 +142,14 @@ class Config:
     leg_slippage_bps: float
     hedge_slippage_bps: float
     net_tolerance_base: float
+    # B4/G1 (2026-09-04): the two legs are meant to cancel. This is the
+    # largest |sum of positions| the engine may carry before it stops
+    # trading outright. Without it, an imbalance can grow silently one
+    # failed hedge at a time -- the shape that cost the entropy-arb
+    # author's peers $1.1M. 0 = disabled (not recommended once live).
+    # Declared without a default so it cannot be forgotten at a call site;
+    # load_config always supplies it (default 3x net_tolerance_base).
+    max_net_base: float
     max_consecutive_errors: int
     rate_limit_pause_sec: float
     staleness_sec: float
@@ -203,6 +211,9 @@ _SCHEMA: Dict[str, Any] = {
     "inventory": {
         "scale_bps": float,
         "floor_frac": float,
+    },
+    "risk": {
+        "max_net_base": float,     # B4/G1: hard cap on |leg A + leg B|
     },
     "execution": {
         "premium_persist_sec": float,
@@ -312,6 +323,14 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         raise ConfigError("thresholds.upper_bps and lower_bps must be > 0 "
                           "(the round trip nets upper+lower bps after fees)")
 
+    # B4/G1: default is 3x the net tolerance -- tight enough that a single
+    # stuck leg trips it, loose enough that normal settle lag does not.
+    max_net_base = float(_get(raw, "risk", "max_net_base",
+                              3.0 * float(_get(raw, "execution",
+                                               "net_tolerance_base", 0.001))))
+    if max_net_base < 0:
+        raise ConfigError("risk.max_net_base must be >= 0 (0 disables)")
+
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
         raise ConfigError("sizing.take_fraction must be in (0, 1] — taking "
@@ -390,6 +409,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         )
 
     return Config(
+        max_net_base=max_net_base,
         symbol=symbol,
         hedge_venue=hedge_venue,
         entropy=entropy,
