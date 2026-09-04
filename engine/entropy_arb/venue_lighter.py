@@ -51,6 +51,12 @@ class AccountOrdersFeed:
         self.ready = asyncio.Event()
         self._pending: dict[int, asyncio.Future] = {}
         self._terminal: OrderedDict[int, dict] = OrderedDict()
+        # B3: the taker path only ever needed terminal outcomes. A maker
+        # order is interesting precisely while it is NOT terminal -- resting,
+        # or resting with half of it already filled -- so every frame is now
+        # remembered, and the still-open ones are indexed separately.
+        self._latest: OrderedDict[int, dict] = OrderedDict()
+        self.open_orders: dict = {}
 
     def watch(self, coi: int) -> asyncio.Future:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -73,21 +79,35 @@ class AccountOrdersFeed:
         if fut is not None and not fut.done():
             fut.set_result(info)
 
+    def latest(self, coi: int) -> Optional[dict]:
+        """Last frame seen for this client order index, open or terminal."""
+        return self._latest.get(coi)
+
+    def _remember(self, coi: int, info: dict) -> None:
+        self._latest[coi] = info
+        self._latest.move_to_end(coi)
+        while len(self._latest) > 512:
+            self._latest.popitem(last=False)
+
     def _handle_orders(self, msg: dict) -> None:
         for lst in (msg.get("orders") or {}).values():
             for o in lst or []:
                 status = str(o.get("status", ""))
-                if status in OPEN_STATUSES:
-                    continue
                 try:
                     coi = int(o.get("client_order_index"))
                 except (TypeError, ValueError):
                     continue
                 fb = float(o.get("filled_base_amount") or 0.0)
                 fq = float(o.get("filled_quote_amount") or 0.0)
-                self._resolve(coi, {"status": status, "filled_base": fb,
-                                    "filled_quote": fq,
-                                    "avg_px": (fq / fb) if fb > 0 else None})
+                info = {"status": status, "filled_base": fb, "filled_quote": fq,
+                        "avg_px": (fq / fb) if fb > 0 else None,
+                        "terminal": status not in OPEN_STATUSES}
+                self._remember(coi, info)
+                if status in OPEN_STATUSES:
+                    self.open_orders[coi] = o
+                    continue
+                self.open_orders.pop(coi, None)
+                self._resolve(coi, info)
 
     async def run(self, stop: asyncio.Event) -> None:
         backoff = 1.0
@@ -262,6 +282,10 @@ class LighterVenue:
         v = math.ceil(px * f - 1e-9) / f if round_up else math.floor(px * f + 1e-9) / f
         return round(v, 8)
 
+    def px_tick(self, px: float) -> float:
+        """One price increment. zkLighter's grid is a fixed decimal count."""
+        return round(10.0 ** -self.price_decimals, 10)
+
     # ------------------------------------------------------------- execution
 
     def _next_coi(self) -> int:
@@ -319,6 +343,161 @@ class LighterVenue:
                         self.name, coi, self.settle_timeout)
             return {"status": "timeout", "filled_base": 0.0, "avg_px": None,
                     "err": None, "unresolved": True}
+
+    # ----------------------------------------------------------- maker (B3)
+    #
+    # zkLighter cancels BY THE CLIENT ORDER INDEX we chose ourselves
+    # (`cancel_order(market_index, order_index=<the client_order_index used at
+    # create>)`, verified against the SDK's own create/modify/cancel example
+    # 2026-09-04). Two consequences, both good:
+    #   * we can cancel an order whose send never came back, and
+    #   * cancelling twice is the same as cancelling once.
+    # What the SDK returns is only whether the cancel TRANSACTION was
+    # accepted. The order's death arrives later, on the account websocket --
+    # so nothing here concludes anything; poll_order() is the only truth.
+
+    async def send_maker(self, *, is_buy: bool, qty: float, limit_px: float,
+                         reduce_only: bool = False) -> dict:
+        """Post-only limit order. Rests on the book; never crosses."""
+        assert self.signer is not None
+        from lighter import SignerClient
+        coi = self._next_coi()
+        out = {"status": "send-failed", "handle": coi, "filled_base": 0.0,
+               "avg_px": None, "err": None, "unresolved": False}
+        base_amount = int(round(qty * 10 ** self.size_decimals))
+        price = int(round(limit_px * 10 ** self.price_decimals))
+        try:
+            _tx, resp, err = await self.signer.create_order(
+                market_index=self.market_id,
+                client_order_index=coi,
+                base_amount=base_amount,
+                price=price,
+                is_ask=not is_buy,
+                order_type=SignerClient.ORDER_TYPE_LIMIT,
+                time_in_force=SignerClient.ORDER_TIME_IN_FORCE_POST_ONLY,
+                reduce_only=reduce_only,
+            )
+        except Exception as e:
+            # The transaction may or may not have landed. The order index is
+            # ours and already allocated, so the caller can still cancel it --
+            # which is exactly what it must do rather than assume nothing
+            # happened.
+            msg = f"{type(e).__name__}: {e}"
+            if getattr(e, "status", None) == 429 or "(429)" in str(e):
+                msg = "RATE_LIMITED: " + msg
+            out["status"] = "send-unresolved"
+            out["unresolved"] = True
+            out["err"] = msg
+            return out
+        if err is not None or (getattr(resp, "code", 200) or 200) != 200:
+            msg = str(err) if err is not None else \
+                f"tx rejected code={resp.code} msg={getattr(resp, 'message', None)}"
+            if "rate limit" in msg.lower():
+                msg = "RATE_LIMITED: " + msg
+            out["err"] = msg
+            return out
+        # Accepted for sequencing. Whether it rested (or was killed as
+        # canceled-post-only) shows up on the account stream.
+        out["status"] = "sent"
+        return out
+
+    async def poll_order(self, handle) -> dict:
+        """Latest account-stream frame for this order.
+
+        There is deliberately no REST fallback here. Lighter's REST account
+        state lags its websocket settlements -- the engine already carries a
+        five-second grace guard for exactly that (RECONCILE_GRACE_SEC) -- so a
+        second, differently-lagging source of truth would create the very
+        disagreement this codebase spent B4 removing. When the stream is
+        silent we say `unknown` and the caller escalates to a position
+        reconcile, which reads the chain and is authoritative.
+        """
+        out = {"status": "unknown", "filled_base": None, "avg_px": None,
+               "terminal": False, "err": None}
+        if handle is None or self.orders_feed is None:
+            return out
+        info = self.orders_feed.latest(int(handle))
+        if info is None:
+            if not self.orders_feed.ready.is_set():
+                out["err"] = "account stream down"
+            return out
+        out["status"] = info["status"]
+        out["filled_base"] = info["filled_base"]
+        out["avg_px"] = info.get("avg_px")
+        out["terminal"] = bool(info.get("terminal"))
+        return out
+
+    async def cancel_order(self, handle) -> dict:
+        """Ask the sequencer to cancel one order. Idempotent by construction:
+        the index is ours. Says nothing about the order's fate."""
+        if handle is None or self.signer is None:
+            return {"status": "rejected", "err": "no handle"}
+        try:
+            _tx, resp, err = await self.signer.cancel_order(
+                market_index=self.market_id, order_index=int(handle))
+        except Exception as e:
+            # Cancels are idempotent, so "did it land?" is answered by
+            # retrying rather than by guessing.
+            return {"status": "unresolved", "err": f"{type(e).__name__}: {e}"}
+        if err is not None or (getattr(resp, "code", 200) or 200) != 200:
+            msg = str(err) if err is not None else \
+                f"tx rejected code={resp.code} msg={getattr(resp, 'message', None)}"
+            low = msg.lower()
+            if "not found" in low or "already" in low or "filled" in low:
+                return {"status": "gone", "err": msg}
+            return {"status": "rejected", "err": msg}
+        return {"status": "accepted", "err": None}
+
+    async def _auth_get(self, path: str, params: dict):
+        auth, err = self.signer.create_auth_token_with_expiry()
+        if err is not None:
+            raise RuntimeError(f"auth token: {err}")
+        async with self.session.get(
+                self.profile.api_url + path, params=params,
+                headers={"authorization": auth},
+                timeout=aiohttp.ClientTimeout(total=REST_TIMEOUT)) as r:
+            r.raise_for_status()
+            return await r.json()
+
+    async def cancel_open_orders(self) -> int:
+        """Cancel every resting order this account has in THIS market.
+
+        Called once at live startup. A previous process that died with a
+        quote on the book leaves an order nobody is hedging -- the same naked
+        exposure as a lost cancel, with no one watching at all. Read over
+        REST rather than from the stream: at startup we have not traded yet,
+        so REST lag is not a hazard, and "what is actually on the book" must
+        not depend on a subscription snapshot having arrived.
+        """
+        if self.signer is None:
+            return 0
+        c = self.conf.lighter_creds
+        data = await self._auth_get("/api/v1/accountActiveOrders",
+                                    {"account_index": str(c.account_index),
+                                     "market_id": str(self.market_id)})
+        cois = []
+        for o in data.get("orders") or []:
+            try:
+                cois.append(int(o["client_order_index"]))
+            except (KeyError, TypeError, ValueError):
+                log.error("[%s] resting order without a usable "
+                          "client_order_index: %s", self.name, str(o)[:200])
+                raise RuntimeError(
+                    f"[{self.name}] a resting order cannot be addressed for "
+                    f"cancellation — refusing to trade on top of it")
+        if not cois:
+            return 0
+        log.critical("[%s] %d resting order(s) found at startup — cancelling "
+                     "before trading / 启动时发现挂单，先撤单再交易",
+                     self.name, len(cois))
+        for coi in cois:
+            res = await self.cancel_order(coi)
+            if res["status"] in ("rejected", "unresolved"):
+                raise RuntimeError(
+                    f"[{self.name}] startup cancel of order {coi} did not "
+                    f"confirm ({res['err']}) — refusing to trade on top of "
+                    f"orders we do not control")
+        return len(cois)
 
     # -------------------------------------------------------------- accounts
 

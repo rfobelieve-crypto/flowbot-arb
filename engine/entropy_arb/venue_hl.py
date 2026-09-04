@@ -165,15 +165,24 @@ class HLVenue:
 
     # ------------------------------------------------------------ price grid
 
+    def _px_decimals(self, px: float) -> int:
+        max_dec = max(0, 6 - self.size_decimals)
+        sig_dec = 4 - math.floor(math.log10(px))
+        return max(0, min(max_dec, sig_dec))
+
     def px_round(self, px: float, round_up: bool) -> float:
         if px <= 0:
             return px
-        max_dec = max(0, 6 - self.size_decimals)
-        sig_dec = 4 - math.floor(math.log10(px))
-        dec = max(0, min(max_dec, sig_dec))
-        f = 10.0 ** dec
+        f = 10.0 ** self._px_decimals(px)
         v = math.ceil(px * f - 1e-9) / f if round_up else math.floor(px * f + 1e-9) / f
         return round(v, 8)
+
+    def px_tick(self, px: float) -> float:
+        """One price increment at this price level. Hyperliquid's grid is
+        significant-figure based, so the tick depends on where you are."""
+        if px <= 0:
+            return 0.0
+        return round(10.0 ** -self._px_decimals(px), 10)
 
     # ------------------------------------------------------------- execution
 
@@ -284,6 +293,196 @@ class HLVenue:
             return {"status": "resting?", "filled_base": 0.0, "avg_px": None,
                     "err": None, "unresolved": True}
         return fail(f"unknown status: {str(st)[:150]}")
+
+    # --------------------------------------------------------- maker (B3)
+    #
+    # Everything below exists for the resting half of execution. Three
+    # properties matter and are worth stating once:
+    #
+    # * The cloid is allocated BEFORE the network call and returned in EVERY
+    #   result, success or not. A send that timed out may well have placed an
+    #   order, and an order we cannot name is an order we cannot cancel.
+    # * Nothing here concludes anything about an order's fate. cancel_order()
+    #   reports whether the exchange ACCEPTED the request; whether the order
+    #   died, and with how much filled, comes only from poll_order().
+    # * An unrecognised or unreachable answer is "unknown", never "gone".
+
+    def _signed_payload(self, action: dict) -> dict:
+        """Wrap one L1 action in this account's next nonce and signature."""
+        s = self._signing
+        nonce = self.account.nonces.next()
+        sig = s.sign_l1_action(self.account.wallet, action, None, nonce,
+                               None, self.account.is_mainnet)
+        return {"action": action, "nonce": nonce, "signature": sig,
+                "vaultAddress": None, "expiresAfter": None}
+
+    async def send_maker(self, *, is_buy: bool, qty: float, limit_px: float,
+                         reduce_only: bool = False) -> dict:
+        """Post-only (ALO) limit order. Rests on the book; never crosses."""
+        assert self.account is not None and self.asset_id >= 0
+        s = self._signing
+        cloid = self._next_cloid()
+        out = {"status": "send-failed", "handle": cloid, "filled_base": 0.0,
+               "avg_px": None, "err": None, "unresolved": False}
+        order_req = {"coin": self.coin, "is_buy": is_buy, "sz": round(qty, 8),
+                     "limit_px": limit_px,
+                     "order_type": {"limit": {"tif": "Alo"}},
+                     "reduce_only": reduce_only, "cloid": cloid}
+        try:
+            wire = s.order_request_to_order_wire(order_req, self.asset_id)
+            payload = self._signed_payload(s.order_wires_to_order_action([wire]))
+        except Exception as e:
+            out["err"] = f"signing failed: {e!r}"
+            return out
+        body, err, unresolved = await self._post_exchange(payload)
+        if err is not None:
+            out["err"] = err
+            return out
+        if unresolved:
+            # Timeout / 5xx. The order may be resting right now. Say so; the
+            # caller must treat it as live and cancel it, not forget it.
+            out["status"] = "send-unresolved"
+            out["unresolved"] = True
+            return out
+        res = self._parse_maker(body)
+        res["handle"] = cloid
+        return res
+
+    @staticmethod
+    def _parse_maker(body: dict) -> dict:
+        base = {"status": "send-failed", "filled_base": 0.0, "avg_px": None,
+                "err": None, "unresolved": False}
+        try:
+            st = body["response"]["data"]["statuses"][0]
+        except (KeyError, IndexError, TypeError):
+            if body.get("status") == "err":
+                base["err"] = str(body.get("response"))
+            else:
+                base["err"] = f"malformed response: {str(body)[:200]}"
+            return base
+        if "resting" in st:
+            base["status"] = "resting"
+            return base
+        if "filled" in st:
+            f = st["filled"]
+            base["status"] = "filled"
+            base["filled_base"] = float(f.get("totalSz") or 0.0)
+            base["avg_px"] = float(f["avgPx"]) if f.get("avgPx") else None
+            return base
+        if "error" in st:
+            msg = str(st["error"])
+            low = msg.lower()
+            if "post only" in low or "post-only" in low:
+                # Would have crossed. Not a failure: the book moved between
+                # planning and sending, which is the normal cost of resting.
+                base["status"] = "post-only-reject"
+                return base
+            if "rate limit" in low or "too many" in low:
+                msg = "RATE_LIMITED: " + msg
+            base["err"] = msg
+            return base
+        base["err"] = f"unknown status: {str(st)[:150]}"
+        return base
+
+    async def poll_order(self, handle) -> dict:
+        """Current exchange truth for one order. `terminal` means the order
+        can never fill again; `unknown` means we learned nothing this time."""
+        out = {"status": "unknown", "filled_base": None, "avg_px": None,
+               "terminal": False, "err": None}
+        if handle is None or self.account is None:
+            return out
+        try:
+            st = await self._info({"type": "orderStatus",
+                                   "user": self.account.query_address,
+                                   "oid": handle.to_raw()})
+        except Exception as e:
+            out["err"] = repr(e)
+            return out
+        if not st or st.get("status") != "order":
+            # "unknownOid" lands here. It can mean never-placed OR aged out
+            # of the cache, and we cannot tell which, so we conclude nothing.
+            out["err"] = str(st.get("status")) if isinstance(st, dict) else None
+            return out
+        o = st.get("order") or {}
+        inner = o.get("order") or {}
+        try:
+            out["filled_base"] = max(float(inner.get("origSz") or 0)
+                                     - float(inner.get("sz") or 0), 0.0)
+        except (TypeError, ValueError):
+            out["filled_base"] = None
+        out["status"] = str(o.get("status") or "unknown")
+        out["terminal"] = out["status"] != "open"
+        return out
+
+    async def cancel_order(self, handle) -> dict:
+        """Ask the exchange to remove one order. Reports only whether the
+        REQUEST was accepted -- the order's fate comes from poll_order()."""
+        if handle is None or self.account is None:
+            return {"status": "rejected", "err": "no handle"}
+        action = {"type": "cancelByCloid",
+                  "cancels": [{"asset": self.asset_id,
+                               "cloid": handle.to_raw()}]}
+        try:
+            payload = self._signed_payload(action)
+        except Exception as e:
+            return {"status": "rejected", "err": f"signing failed: {e!r}"}
+        body, err, unresolved = await self._post_exchange(payload)
+        if err is not None:
+            return {"status": "rejected", "err": err}
+        if unresolved:
+            return {"status": "unresolved", "err": None}
+        try:
+            st = body["response"]["data"]["statuses"][0]
+        except (KeyError, IndexError, TypeError):
+            return {"status": "unresolved",
+                    "err": f"malformed cancel response: {str(body)[:200]}"}
+        if st == "success":
+            return {"status": "accepted", "err": None}
+        msg = str(st.get("error") if isinstance(st, dict) else st)
+        low = msg.lower()
+        if "never placed" in low or "already canceled" in low or "filled" in low:
+            # The order is off the book -- but this does NOT say whether it
+            # filled or was canceled, so it is "gone", not "canceled".
+            return {"status": "gone", "err": msg}
+        return {"status": "rejected", "err": msg}
+
+    async def cancel_open_orders(self) -> int:
+        """Cancel every resting order this account has in THIS market.
+
+        Called once at live startup. A previous process that died with a
+        quote on the book leaves an order nobody is hedging -- the same naked
+        exposure as a lost cancel, only with no one watching at all.
+        """
+        if self.account is None:
+            return 0
+        try:
+            req = {"type": "openOrders", "user": self.account.query_address}
+            if self.conf.hl_dex:
+                req["dex"] = self.conf.hl_dex
+            orders = await self._info(req)
+        except Exception as e:
+            log.warning("[%s] could not list open orders: %r", self.name, e)
+            return 0
+        oids = [int(o["oid"]) for o in (orders or [])
+                if o.get("coin") == self.coin and o.get("oid") is not None]
+        if not oids:
+            return 0
+        log.critical("[%s] %d resting order(s) found at startup — cancelling "
+                     "before trading / 启动时发现挂单，先撤单再交易", self.name,
+                     len(oids))
+        action = {"type": "cancel",
+                  "cancels": [{"a": self.asset_id, "o": o} for o in oids]}
+        try:
+            payload = self._signed_payload(action)
+        except Exception as e:
+            raise RuntimeError(f"[{self.name}] cannot sign startup cancel: {e!r}")
+        body, err, unresolved = await self._post_exchange(payload)
+        if err is not None or unresolved:
+            raise RuntimeError(
+                f"[{self.name}] startup cancel of {len(oids)} resting order(s) "
+                f"did not confirm ({err or 'unresolved'}) — refusing to trade "
+                f"on top of orders we do not control")
+        return len(oids)
 
     # -------------------------------------------------------------- accounts
 

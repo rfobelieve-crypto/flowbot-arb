@@ -190,3 +190,172 @@ def plan_arb(buy_book: OrderBook, sell_book: OrderBook, *, threshold_bps: float,
         marginal_premium_bps=(sell_limit / buy_limit - 1.0) * 1e4,
         buy_fee=buy_fee, sell_fee=sell_fee,
     ), "ok"
+
+
+# ------------------------------------------------------------- maker sizing
+#
+# B3 (2026-09-04). The taker planner asks "how much of this crossable edge can
+# I take?". The maker planner asks a different and stricter question: "at what
+# price may I REST, and how much of that may I promise, given that whatever
+# fills I must immediately hedge on the other venue?"
+#
+# The stricter half is the size. A taker slice that fails to fill costs
+# nothing; a maker fill that cannot be hedged is a naked position. So the size
+# is bounded by the HEDGE venue's depth, never by the maker venue's.
+
+
+def hedgeable_base(levels: List[Level], accept) -> Tuple[float, float]:
+    """Depth on the hedge side, walked while `accept(price)` holds.
+
+    Unlike crossable_base this compares every level against a FIXED maker
+    price (ours, already decided), because a resting order's price does not
+    move as the hedge book is consumed.
+    """
+    qty = 0.0
+    notional = 0.0
+    for px, sz in levels:
+        if not accept(px):
+            break
+        qty += sz
+        notional += sz * px
+    return qty, notional
+
+
+def depth_base(levels: List[Level]) -> float:
+    return sum(sz for _, sz in levels)
+
+
+@dataclass
+class MakerPlan:
+    maker_is_buy: bool        # side WE rest on the maker venue
+    maker_px: float           # post-only limit price
+    qty: float
+    maker_notional: float
+    hedge_limit: float        # marginal hedge price at qty (pre-slippage)
+    hedge_notional: float
+    hedge_depth: float        # hedgeable base at an acceptable price
+    top_premium_bps: float    # the premium we would be acting on
+    edge_bps: float           # net of BOTH fees, at the posted price
+    maker_fee: float
+    hedge_fee: float
+
+    @property
+    def exp_edge_usd(self) -> float:
+        if self.maker_is_buy:
+            return (self.hedge_notional * (1.0 - self.hedge_fee)
+                    - self.maker_notional * (1.0 + self.maker_fee))
+        return (self.maker_notional * (1.0 - self.maker_fee)
+                - self.hedge_notional * (1.0 + self.hedge_fee))
+
+
+def maker_edge_bps(maker_px: float, maker_is_buy: bool, hedge_book: OrderBook,
+                   *, maker_fee_bps: float, hedge_fee_bps: float,
+                   qty: float) -> Optional[float]:
+    """Net bps left in an ALREADY RESTING quote if its fill were hedged now.
+
+    Returns None when the hedge side cannot absorb `qty` at all -- which the
+    caller must read as "cancel", not as "zero edge": a quote we cannot hedge
+    is worse than a quote that makes no money.
+    """
+    levels = hedge_book.sorted_bids() if maker_is_buy else hedge_book.sorted_asks()
+    if not levels or maker_px <= 0:
+        return None
+    if depth_base(levels) < qty - 1e-12:
+        return None
+    hedge_px, _ = walk_depth(levels, max(qty, 0.0))
+    mf, hf = maker_fee_bps / 1e4, hedge_fee_bps / 1e4
+    if maker_is_buy:
+        return (hedge_px * (1.0 - hf) / (maker_px * (1.0 + mf)) - 1.0) * 1e4
+    return (maker_px * (1.0 - mf) / (hedge_px * (1.0 + hf)) - 1.0) * 1e4
+
+
+def plan_maker(maker_book: OrderBook, hedge_book: OrderBook, *,
+               maker_is_buy: bool, threshold_bps: float, maker_fee_bps: float,
+               hedge_fee_bps: float, take_fraction: float,
+               cap_notional: float, min_base: float, min_notional: float,
+               size_step: float, px_round, tick: float):
+    """Price and size one post-only quote. Returns (MakerPlan | None, reason).
+
+    Price: the best price on our own side of the maker book that still clears
+    the hurdle -- top of the queue when the hurdle allows it, the hurdle price
+    when it does not, and nothing at all when even joining the BBO would lose
+    money. Rounding is always in the direction that protects the hurdle (a
+    resting bid rounds down, a resting ask rounds up), so the grid can cost us
+    fill probability but never edge.
+
+    Size: `take_fraction` of the HEDGE side's acceptable depth, capped by
+    notional. Never post what you cannot hedge.
+    """
+    m_bid, m_ask = maker_book.best_bid(), maker_book.best_ask()
+    if m_bid is None or m_ask is None:
+        return None, "empty_book"
+    if m_bid >= m_ask:
+        # A crossed or locked book is a broken book. Resting inside one is
+        # how you get picked off by whatever is broken about it.
+        return None, "crossed_book"
+    levels = hedge_book.sorted_bids() if maker_is_buy else hedge_book.sorted_asks()
+    if not levels:
+        return None, "empty_book"
+    if tick <= 0:
+        return None, "bad_tick"
+
+    thr = threshold_bps / 1e4
+    mf = maker_fee_bps / 1e4
+    hf = hedge_fee_bps / 1e4
+    h0 = levels[0][0]
+
+    if maker_is_buy:
+        # We rest a BID and will SELL into the hedge bid once filled.
+        p_lim = h0 * (1.0 - hf) / ((1.0 + mf) * (1.0 + thr))   # most we may pay
+        improve = m_bid + tick
+        if improve >= m_ask:              # one-tick spread: no room to improve
+            improve = m_bid               # join the queue instead
+        px = px_round(min(p_lim, improve), False)              # never overpay
+        if px < m_bid - 1e-12:
+            return None, "no_edge"        # hurdle needs a price behind the BBO
+        if px >= m_ask:
+            return None, "would_cross"    # px_round misbehaved; refuse to post
+    else:
+        # We rest an ASK and will BUY on the hedge ask once filled.
+        p_lim = h0 * (1.0 + hf) * (1.0 + thr) / (1.0 - mf)  # least we may take
+        improve = m_ask - tick
+        if improve <= m_bid:
+            improve = m_ask
+        px = px_round(max(p_lim, improve), True)               # never undersell
+        if px > m_ask + 1e-12:
+            return None, "no_edge"
+        if px <= m_bid:
+            return None, "would_cross"
+
+    if maker_is_buy:
+        def accept(level_px: float) -> bool:
+            return level_px * (1.0 - hf) >= px * (1.0 + mf) * (1.0 + thr)
+    else:
+        def accept(level_px: float) -> bool:
+            return px * (1.0 - mf) >= level_px * (1.0 + hf) * (1.0 + thr)
+
+    hedge_depth, _ = hedgeable_base(levels, accept)
+    if hedge_depth <= 0:
+        return None, "no_hedge_depth"
+    qty = floor_step(min(hedge_depth * take_fraction, cap_notional / px),
+                     size_step)
+    if qty < min_base:
+        return None, "below_min_base"
+    hedge_limit, hedge_notional = walk_depth(levels, qty)
+    maker_notional = qty * px
+    if maker_notional < min_notional or hedge_notional < min_notional:
+        return None, "below_min_notional"
+
+    if maker_is_buy:
+        sell_px, buy_px, sell_fee, buy_fee = hedge_limit, px, hf, mf
+    else:
+        sell_px, buy_px, sell_fee, buy_fee = px, hedge_limit, mf, hf
+    return MakerPlan(
+        maker_is_buy=maker_is_buy, maker_px=px, qty=qty,
+        maker_notional=maker_notional, hedge_limit=hedge_limit,
+        hedge_notional=hedge_notional, hedge_depth=hedge_depth,
+        top_premium_bps=(sell_px / buy_px - 1.0) * 1e4,
+        edge_bps=(sell_px * (1.0 - sell_fee)
+                  / (buy_px * (1.0 + buy_fee)) - 1.0) * 1e4,
+        maker_fee=mf, hedge_fee=hf,
+    ), "ok"

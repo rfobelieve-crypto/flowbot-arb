@@ -106,7 +106,13 @@ class VenueConf:
     kind: str                 # "hl" | "lighter"
     label: str                # human name for logs, e.g. "ENTROPY", "RH"
     symbol: str
-    fee_bps: float
+    fee_bps: float            # TAKER fee, bps
+    # B3: the maker fee is a different number and the whole reason the maker
+    # path exists (COST_INVENTORY: 13.5 bps taker hurdle vs 4.5 bps maker).
+    # It may be NEGATIVE where the venue pays a rebate. It defaults to the
+    # taker fee, never to zero: assuming a fee schedule you have not measured
+    # is how a losing pair looks profitable on paper.
+    maker_fee_bps: float
     cap_usd: float
     orders_per_min: int
     # hl
@@ -136,6 +142,25 @@ class Config:
     inventory_scale_bps: float
     inventory_floor_frac: float
     # execution
+    # B3 (2026-09-04) maker path. `mode` defaults to taker, so every config
+    # written before B3 loads byte-for-byte identically.
+    mode: str
+    maker_venue: str
+    # How long one post-only quote may rest before it is cancelled. This is
+    # the numerator of M2's fill rate (LIVE_50U_SPEC S2).
+    maker_timeout_sec: float
+    # PEER_INFRA S7 must #3: the cancel gets its OWN budget, NOT staleness_sec
+    # and not the quote's lifetime. A cancel unconfirmed past this is treated
+    # as POSSIBLY FILLED, never as cancelled.
+    cancel_timeout_sec: float
+    maker_poll_sec: float
+    # Cancel a resting quote once the edge it was posted for decays below
+    # this (bps, net of both fees, measured against the CURRENT hedge book).
+    # The XEMM lesson inverted: they cancel when the edge gets absurdly good
+    # because that means they are the stale quote; we also cancel when it
+    # goes bad, because a quote we can no longer hedge profitably is an
+    # adverse-selection machine. 0 = cancel as soon as it would lose money.
+    maker_min_edge_bps: float
     premium_persist_sec: float
     cooldown_sec: float
     settle_timeout_sec: float
@@ -187,6 +212,7 @@ class Config:
     log_level: str
     status_interval_sec: float
     trades_csv: str
+    maker_csv: str
     dashboard: bool
     log_file: str
     # runtime
@@ -218,12 +244,14 @@ _SCHEMA: Dict[str, Any] = {
         "venue": str,          # local patch 2026-09-04: hl | lighter | lighter-rh
         "symbol": str,         # alias on the leg-A venue (same idea as hedge.symbol)
         "taker_fee_bps": float,
+        "maker_fee_bps": float,
         "max_position_usd": float,
         "max_orders_per_min": int,
     },
     "hedge": {
         "symbol": None,   # optional ticker alias on the hedge venue (local patch 2026-08-30)
         "taker_fee_bps": float,
+        "maker_fee_bps": float,
         "max_position_usd": float,
         "max_orders_per_min": int,
     },
@@ -245,6 +273,12 @@ _SCHEMA: Dict[str, Any] = {
         "max_edge_bps": float,        # B4: refuse an edge too good to be true
     },
     "execution": {
+        "mode": str,                  # B3: taker | maker
+        "maker_venue": str,           # B3: which leg rests (entropy | hedge)
+        "maker_timeout_sec": float,   # B3: how long a quote may rest
+        "cancel_timeout_sec": float,  # B3: the cancel's OWN budget
+        "maker_poll_sec": float,      # B3: how often a resting order is read
+        "maker_min_edge_bps": float,  # B3: cancel a quote whose edge decayed
         "premium_persist_sec": float,
         "cooldown_sec": float,
         "settle_timeout_sec": float,
@@ -266,6 +300,7 @@ _SCHEMA: Dict[str, Any] = {
         "level": str,
         "status_interval_sec": float,
         "trades_csv": str,
+        "maker_csv": str,
         "dashboard": bool,
         "file": str,
     },
@@ -375,6 +410,32 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     if max_edge_bps < 0:
         raise ConfigError("risk.max_edge_bps must be >= 0 (0 disables)")
 
+    mode = str(_get(raw, "execution", "mode", "taker") or "taker").lower()
+    if mode not in ("taker", "maker"):
+        raise ConfigError(f"execution.mode must be taker|maker, got {mode!r}")
+    maker_venue = str(_get(raw, "execution", "maker_venue", "entropy")
+                      or "entropy").lower()
+    if maker_venue not in ("entropy", "hedge"):
+        raise ConfigError("execution.maker_venue must be entropy|hedge, got "
+                          f"{maker_venue!r}")
+    maker_timeout_sec = float(_get(raw, "execution", "maker_timeout_sec", 5.0))
+    cancel_timeout_sec = float(_get(raw, "execution", "cancel_timeout_sec", 3.0))
+    maker_poll_sec = float(_get(raw, "execution", "maker_poll_sec", 0.25))
+    if mode == "maker":
+        for name, v in (("maker_timeout_sec", maker_timeout_sec),
+                        ("cancel_timeout_sec", cancel_timeout_sec),
+                        ("maker_poll_sec", maker_poll_sec)):
+            if v <= 0:
+                raise ConfigError(f"execution.{name} must be > 0 in maker mode "
+                                  f"(a zero budget is not a budget)")
+
+    # Maker executions get their own CSV: the columns that matter for a
+    # resting quote (rest time, fill vs cancel, cancel latency) have no
+    # meaning for an IOC pair, and LIVE_50U_SPEC M2/M3/M4 read them directly.
+    trades_csv = _get(raw, "logging", "trades_csv", "logs/trades.csv")
+    maker_csv = _get(raw, "logging", "maker_csv", None) or os.path.join(
+        os.path.dirname(trades_csv), "maker.csv")
+
     take_fraction = float(_get(raw, "sizing", "take_fraction", 0.5))
     if not 0.0 < take_fraction <= 1.0:
         raise ConfigError("sizing.take_fraction must be in (0, 1] — taking "
@@ -394,6 +455,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         key="entropy", kind="hl", label="ENTROPY" if entropy_dex else "HL",
         symbol=symbol,
         fee_bps=float(_get(raw, "entropy", "taker_fee_bps", 0.0)),
+        maker_fee_bps=float(_get(raw, "entropy", "maker_fee_bps",
+                                 _get(raw, "entropy", "taker_fee_bps", 0.0))),
         cap_usd=float(_get(raw, "entropy", "max_position_usd", 1000.0)),
         orders_per_min=int(_get(raw, "entropy", "max_orders_per_min", 120)),
         hl_dex=entropy_dex,
@@ -415,6 +478,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             label="LIGHTER" if entropy_venue == "lighter" else "RH",
             symbol=str(_get(raw, "entropy", "symbol", None) or symbol),
             fee_bps=float(_get(raw, "entropy", "taker_fee_bps", 0.0)),
+            maker_fee_bps=float(_get(raw, "entropy", "maker_fee_bps",
+                                     _get(raw, "entropy", "taker_fee_bps", 0.0))),
             cap_usd=float(_get(raw, "entropy", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "entropy", "max_orders_per_min", 30)),
             lighter_profile=LIGHTER_PROFILES[entropy_venue],
@@ -429,6 +494,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             key="hedge", kind="hl", label="XYZ",
             symbol=symbol,
             fee_bps=float(_get(raw, "hedge", "taker_fee_bps", 1.0)),
+            maker_fee_bps=float(_get(raw, "hedge", "maker_fee_bps",
+                                     _get(raw, "hedge", "taker_fee_bps", 1.0))),
             cap_usd=float(_get(raw, "hedge", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "hedge", "max_orders_per_min", 120)),
             hl_dex="xyz",
@@ -445,6 +512,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             label="LIGHTER" if hedge_venue == "lighter" else "RH",
             symbol=str(_get(raw, "hedge", "symbol", None) or symbol),
             fee_bps=float(_get(raw, "hedge", "taker_fee_bps", 0.0)),
+            maker_fee_bps=float(_get(raw, "hedge", "maker_fee_bps",
+                                     _get(raw, "hedge", "taker_fee_bps", 0.0))),
             cap_usd=float(_get(raw, "hedge", "max_position_usd", 1000.0)),
             orders_per_min=int(_get(raw, "hedge", "max_orders_per_min", 30)),
             lighter_profile=LIGHTER_PROFILES[hedge_venue],
@@ -471,6 +540,12 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         min_order_notional=float(_get(raw, "sizing", "min_order_notional_usd", 10.0)),
         inventory_scale_bps=float(_get(raw, "inventory", "scale_bps", 10.0)),
         inventory_floor_frac=float(_get(raw, "inventory", "floor_frac", 0.5)),
+        mode=mode,
+        maker_venue=maker_venue,
+        maker_timeout_sec=maker_timeout_sec,
+        cancel_timeout_sec=cancel_timeout_sec,
+        maker_poll_sec=maker_poll_sec,
+        maker_min_edge_bps=float(_get(raw, "execution", "maker_min_edge_bps", 0.0)),
         premium_persist_sec=float(_get(raw, "execution", "premium_persist_sec", 0.3)),
         cooldown_sec=float(_get(raw, "execution", "cooldown_sec", 0.0)),
         settle_timeout_sec=float(_get(raw, "execution", "settle_timeout_sec", 5.0)),
@@ -487,7 +562,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         recorder_csv=_get(raw, "recorder", "csv", "logs/minutes.csv"),
         log_level=str(_get(raw, "logging", "level", "INFO")).upper(),
         status_interval_sec=float(_get(raw, "logging", "status_interval_sec", 30.0)),
-        trades_csv=_get(raw, "logging", "trades_csv", "logs/trades.csv"),
+        trades_csv=trades_csv,
+        maker_csv=maker_csv,
         dashboard=bool(_get(raw, "logging", "dashboard", True)),
         log_file=_get(raw, "logging", "file", "logs/engine.log"),
     )

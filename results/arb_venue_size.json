@@ -1,0 +1,100 @@
+{
+ "span_days": 4.89,
+ "pairs": 2748,
+ "cells": {
+  "equity": {
+   "BIG-BIG": {
+    "pairs": 88,
+    "band_med": 2.9,
+    "band_p75": 4.71,
+    "depth_med": 165.0
+   },
+   "BIG-SMALL": {
+    "pairs": 216,
+    "band_med": 9.86,
+    "band_p75": 13.43,
+    "depth_med": 352.0
+   },
+   "SMALL-SMALL": {
+    "pairs": 73,
+    "band_med": 10.39,
+    "band_p75": 14.0,
+    "depth_med": 374.0
+   }
+  },
+  "crypto": {
+   "BIG-BIG": {
+    "pairs": 1186,
+    "band_med": 6.91,
+    "band_p75": 10.32,
+    "depth_med": 39.0
+   },
+   "BIG-SMALL": {
+    "pairs": 1031,
+    "band_med": 13.0,
+    "band_p75": 19.1,
+    "depth_med": 100.0
+   },
+   "SMALL-SMALL": {
+    "pairs": 154,
+    "band_med": 13.04,
+    "band_p75": 18.39,
+    "depth_med": 210.0
+   }
+  }
+ },
+ "ratio_equity": 0.95,
+ "ratio_crypto": 1.0,
+ "bars": {
+  "P1 股票/商品 BIG-SMALL 帶中位 ≥ 3.0× SMALL-SMALL": false,
+  "P2 對照組 BIG-BIG 最窄": true
+ },
+ "verdict": "沒有支持「寬一個數量級」——不因為這份外部報告改變配對選擇",
+ "v2": {
+  "pairs": 2724,
+  "cells": {
+   "equity": {
+    "BIG-BIG": {
+     "pairs": 86,
+     "band_med": 2.76,
+     "band_p75": 3.89,
+     "depth_med": 145.0
+    },
+    "BIG-SMALL": {
+     "pairs": 205,
+     "band_med": 9.29,
+     "band_p75": 12.89,
+     "depth_med": 338.0
+    },
+    "SMALL-SMALL": {
+     "pairs": 62,
+     "band_med": 10.01,
+     "band_p75": 12.98,
+     "depth_med": 370.0
+    }
+   },
+   "crypto": {
+    "BIG-BIG": {
+     "pairs": 1186,
+     "band_med": 6.91,
+     "band_p75": 10.32,
+     "depth_med": 39.0
+    },
+    "BIG-SMALL": {
+     "pairs": 1031,
+     "band_med": 13.0,
+     "band_p75": 19.1,
+     "depth_med": 100.0
+    },
+    "SMALL-SMALL": {
+     "pairs": 154,
+     "band_med": 13.04,
+     "band_p75": 18.39,
+     "depth_med": 210.0
+    }
+   }
+  },
+  "ratio_equity": 0.93,
+  "ratio_crypto": 1.0
+ }
+}

@@ -22,7 +22,7 @@
 param([switch]$DryRun)
 
 $Root = 'C:\Users\rfo\Desktop\flowbot\arb\engine'
-$Log  = 'C:\Users\rfo\Desktop\flowbot\flow_system\research\results\arb_watchdog.log'
+$Log  = 'C:\Users\rfo\Desktop\flowbot\arb\results\arb_watchdog.log'
 
 # member name -> (command-line signature, launcher .bat)
 $Members = [ordered]@{

@@ -24,8 +24,11 @@ from typing import Dict, List, Optional
 
 import aiohttp
 
-from .book import ArbPlan, floor_step, plan_arb
+from . import maker as mk
+from .book import (ArbPlan, MakerPlan, floor_step, maker_edge_bps, plan_arb,
+                   plan_maker)
 from .config import Config
+from .maker import MakerOrder
 from .recorder import MinuteRecorder
 from .venue_hl import HLVenue
 from .venue_lighter import LighterVenue
@@ -37,6 +40,14 @@ CSV_HEADER = ["ts", "direction", "buy_venue", "sell_venue", "qty",
               "exp_edge_usd", "gross_edge_usd", "marginal_premium_bps",
               "midline_bps", "inv_add_bps", "ok", "buy_fill", "sell_fill",
               "buy_status", "sell_status", "fill_edge_usd"]
+# B3: resting quotes need columns an IOC pair has no use for. M2 (fill rate)
+# is outcome over rows; M4 (two-leg latency) is first_fill_ms + hedge_ms; M3
+# (adverse selection) is mid_at_fill compared against later minute bars.
+MAKER_CSV_HEADER = ["ts", "direction", "maker_venue", "hedge_venue", "side",
+                    "px", "qty", "filled", "hedged", "status", "outcome",
+                    "edge_bps", "exp_edge_usd", "fill_edge_usd", "rest_ms",
+                    "first_fill_ms", "hedge_ms", "cancel_ms",
+                    "cancel_attempts", "cancel_reason", "mid_at_fill"]
 BALANCE_POLL_SEC = 30.0
 
 
@@ -95,6 +106,15 @@ class Engine:
         self._venue_fetch_fails: Dict[str, int] = {}
         # per-execution records for the dashboard (newest last)
         self.recent_trades: deque = deque(maxlen=50)
+        # B3 maker path: venue key -> the one order resting there. An order
+        # stays in this map until the EXCHANGE resolves it, so an unconfirmed
+        # cancel blocks the next quote instead of being quietly forgotten.
+        self._maker_open: Dict[str, MakerOrder] = {}
+        self.maker_posts = 0        # quotes sent           -> M2 denominator
+        self.maker_fills = 0        # quotes that got any fill -> M2 numerator
+        self.maker_cancels = 0      # quotes cancelled unfilled
+        self.maker_rejects = 0      # post-only rejections (book moved)
+        self.maker_unknown = 0      # cancels that blew their budget
 
     # ------------------------------------------------------------- utilities
 
@@ -191,6 +211,7 @@ class Engine:
         else:
             log.warning("LIVE — real orders will be sent (use --record-only "
                         "for credential-less data collection)")
+            await self._cancel_stale_orders()
             await self._reconcile_positions(hedge=False, strict=True)
             log.info("starting positions: %s (net %+.6g)",
                      " ".join(f"{v.name}={v.position:+.6g}"
@@ -251,8 +272,13 @@ class Engine:
         if self._exec_tasks:  # let in-flight executions settle, never cancel
             log.info("waiting for %d in-flight execution(s) to settle",
                      len(self._exec_tasks))
-            await asyncio.wait(self._exec_tasks,
-                               timeout=cfg.settle_timeout_sec + 2.0)
+            await asyncio.wait(
+                self._exec_tasks,
+                # a resting quote has to be cancelled AND confirmed before
+                # this process may exit, so its budget is part of the wait
+                timeout=(cfg.settle_timeout_sec
+                         + (cfg.cancel_timeout_sec * 2 + 3.0
+                            if cfg.mode == "maker" else 0.0) + 2.0))
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -356,6 +382,9 @@ class Engine:
         now = time.time()
         if now - self.last_trade_ts < cfg.cooldown_sec:
             self._schedule_poke(cfg.cooldown_sec - (now - self.last_trade_ts))
+            return
+        if cfg.mode == "maker":
+            await self._evaluate_maker(now)
             return
         best = self._scan(now)
         if best is None:
@@ -582,6 +611,548 @@ class Engine:
             "prem_bps": plan.marginal_premium_bps,
             "exp": plan.exp_edge_usd, "fill": fill_edge, "status": status,
             "ok": ok})
+
+    # ------------------------------------------------------------ maker (B3)
+    #
+    # The taker path sends both legs at once and learns both outcomes in one
+    # round trip. The maker path posts ONE leg, waits, and hedges whatever
+    # comes back -- which means that for the whole life of the quote the
+    # exchange, not this process, knows what our position is. Every method
+    # below is written around that: local state is a shadow of exchange
+    # reports (entropy_arb/maker.py), and nothing here concludes anything
+    # from an action we took.
+
+    def _maker_legs(self):
+        """(the venue we rest on, the venue we hedge on)."""
+        maker_v = (self.entropy if self.cfg.maker_venue == "entropy"
+                   else self.hedge)
+        taker_v = self.hedge if maker_v is self.entropy else self.entropy
+        return maker_v, taker_v
+
+    def _plan_quote(self, maker_v, taker_v, maker_is_buy, thr_bps, cap):
+        ref = maker_v.book.mid()
+        if not ref:
+            return None, "empty_book"
+        return plan_maker(
+            maker_v.book, taker_v.book, maker_is_buy=maker_is_buy,
+            threshold_bps=thr_bps,
+            maker_fee_bps=maker_v.maker_fee_bps,
+            hedge_fee_bps=taker_v.fee_bps,
+            take_fraction=self.cfg.take_fraction, cap_notional=cap,
+            min_base=self._min_base, min_notional=self._min_notional,
+            size_step=self._step, px_round=maker_v.px_round,
+            tick=maker_v.px_tick(ref))
+
+    def _scan_maker(self, now):
+        """Best post-only quote, or None.
+
+        Same guards as _scan, plus two of its own: only one quote may be
+        alive at a time (an unresolved order blocks the next one by design),
+        and the size comes from plan_maker, which bounds it by the HEDGE
+        venue's depth rather than our own.
+        """
+        cfg = self.cfg
+        if self._maker_open:
+            return None
+        maker_v, taker_v = self._maker_legs()
+        fresh = (maker_v.book.is_fresh(cfg.staleness_sec)
+                 and taker_v.book.is_fresh(cfg.staleness_sec))
+        if fresh:
+            self._stale_streak = 0
+        else:
+            self._stale_streak += 1
+            if (cfg.max_consecutive_stale
+                    and self._stale_streak >= cfg.max_consecutive_stale):
+                self._risk_halt(
+                    f"books stale {self._stale_streak} evaluations in a row "
+                    f"(> {cfg.staleness_sec:.0f}s each) — a dead feed looks "
+                    f"exactly like a quiet market")
+            return None
+        if not (maker_v.ready_to_trade() and taker_v.ready_to_trade()):
+            return None
+        if self._venue_down:
+            return None
+        if self._vlock(maker_v.key).locked() or self._vlock(taker_v.key).locked():
+            return None
+        if self._venue_limited(maker_v) or self._venue_limited(taker_v):
+            return None
+        if not (self._venue_rate_ok(maker_v) and self._venue_rate_ok(taker_v)):
+            self._skiplog("maker quote deferred: venue order budget exhausted")
+            return None
+        best = None
+        for maker_is_buy in (True, False):
+            # posting a bid on venue M means we BUY on M and SELL on the
+            # other; the hurdle is the same band the taker path uses.
+            buy_v, sell_v = ((maker_v, taker_v) if maker_is_buy
+                             else (taker_v, maker_v))
+            dkey = "sell_entropy" if sell_v.key == "entropy" else "buy_entropy"
+            plan, reason = self._plan_quote(maker_v, taker_v, maker_is_buy,
+                                            self._eff_threshold(buy_v, sell_v),
+                                            cfg.max_order_notional)
+            if plan is None:
+                if reason in ("no_edge", "empty_book", "crossed_book",
+                              "no_hedge_depth", "would_cross"):
+                    self._armed[dkey] = None
+                continue
+            armed = self._armed.get(dkey)
+            if armed is None:
+                self._armed[dkey] = now
+                self._schedule_poke(cfg.premium_persist_sec)
+                continue
+            if now - armed < cfg.premium_persist_sec:
+                self._schedule_poke(cfg.premium_persist_sec - (now - armed))
+                continue
+            ceil_bps = cfg.max_edge_bps
+            if ceil_bps > 0 and plan.top_premium_bps > ceil_bps:
+                self._absurd_skips += 1
+                self._skiplog("%s REFUSED: premium %.1f bps exceeds "
+                              "max_edge_bps %.1f — treating the book as wrong, "
+                              "not the market as generous (skips=%d)",
+                              dkey, plan.top_premium_bps, ceil_bps,
+                              self._absurd_skips)
+                self._armed[dkey] = None
+                continue
+            headroom = self._headroom(buy_v, sell_v, plan.maker_px)
+            if headroom < plan.maker_notional:
+                plan, _ = self._plan_quote(
+                    maker_v, taker_v, maker_is_buy,
+                    self._eff_threshold(buy_v, sell_v),
+                    min(cfg.max_order_notional, headroom))
+                if plan is None:
+                    self._skiplog("%s quote blocked by position caps "
+                                  "(headroom $%.0f)", dkey, max(headroom, 0.0))
+                    continue
+            if best is None or plan.exp_edge_usd > best[2].exp_edge_usd:
+                best = (maker_is_buy, dkey, plan)
+        return best
+
+    async def _evaluate_maker(self, now: float) -> None:
+        best = self._scan_maker(now)
+        if best is None:
+            return
+        maker_is_buy, dkey, plan = best
+        maker_v, taker_v = self._maker_legs()
+        order = MakerOrder(venue_key=maker_v.key, is_buy=maker_is_buy,
+                           qty=plan.qty, px=plan.maker_px, sent_ts=now)
+        order.stats["dkey"] = dkey
+        # Registered BEFORE the first await. _scan_maker refuses to plan a
+        # second quote while one exists, and that check must not be able to
+        # race the task that creates the first.
+        self._maker_open[maker_v.key] = order
+        t = asyncio.create_task(
+            self._execute_maker(maker_v, taker_v, plan, order),
+            name="maker")
+        self._exec_tasks.add(t)
+        t.add_done_callback(self._exec_tasks.discard)
+        await asyncio.shield(t)
+        self._update_evt.set()
+
+    async def _execute_maker(self, maker_v, taker_v, plan: MakerPlan,
+                             order: MakerOrder) -> None:
+        cfg = self.cfg
+        dkey = order.stats.get("dkey", "?")
+        self.maker_posts += 1
+        self.last_trade_ts = time.time()
+        log.info("[QUOTE] %s: rest %s %.6g @%.6g on %s | hedge on %s @~%.6g | "
+                 "edge %.2fbps | exp $%.4f | hedgeable %.6g",
+                 dkey, "BUY" if order.is_buy else "SELL", plan.qty,
+                 plan.maker_px, maker_v.name, taker_v.name, plan.hedge_limit,
+                 plan.edge_bps, plan.exp_edge_usd, plan.hedge_depth)
+        try:
+            async with self._vlock(maker_v.key):
+                self._record_send(maker_v)
+                res = await maker_v.send_maker(is_buy=order.is_buy,
+                                               qty=plan.qty,
+                                               limit_px=plan.maker_px)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                  # noqa: BLE001
+            log.exception("[QUOTE] %s: send raised on %s", dkey, maker_v.name)
+            res = {"status": "send-unresolved", "handle": None,
+                   "filled_base": 0.0, "avg_px": None, "err": repr(e),
+                   "unresolved": True}
+        order.on_handle(res.get("handle"))
+        status = str(res.get("status") or "")
+        err = res.get("err")
+        if str(err or "").startswith("RATE_LIMITED"):
+            self._mark_limited(maker_v)
+
+        if status == "post-only-reject":
+            # The book moved between planning and sending. Not a failure --
+            # it is the normal cost of insisting on being the passive side.
+            self.maker_rejects += 1
+            self._skiplog("[QUOTE] %s: post-only rejected on %s — the book "
+                          "moved between planning and sending (x%d)",
+                          dkey, maker_v.name, self.maker_rejects)
+            order.apply("canceled-post-only")
+            await self._finish_maker(maker_v, taker_v, plan, order)
+            return
+        if status == "send-failed":
+            log.error("[QUOTE] %s: send failed on %s: %s", dkey,
+                      maker_v.name, err)
+            if not str(err or "").startswith("RATE_LIMITED"):
+                self.consec_errors += 1
+                if self.consec_errors >= cfg.max_consecutive_errors:
+                    self._risk_halt(f"{self.consec_errors} consecutive "
+                                    f"execution problems")
+            # A rejected send never reached the book: the exchange told us so
+            # in the same response. This is the ONE place local state may
+            # retire an order without a poll, and only because the rejection
+            # IS the exchange's report.
+            order.apply("rejected")
+            await self._finish_maker(maker_v, taker_v, plan, order)
+            return
+        self.consec_errors = 0
+        if status == "filled":
+            order.apply("filled", res.get("filled_base"), res.get("avg_px"))
+        elif status == "resting":
+            order.apply("open")
+        elif status == "send-unresolved":
+            # We do not know whether it is on the book. The handle is ours
+            # and already allocated, so the pessimistic action is available:
+            # cancel it. Cancelling an order that was never placed costs one
+            # request; assuming it was never placed costs a naked position.
+            log.warning("[QUOTE] %s: send outcome UNKNOWN on %s (%s) — "
+                        "treating the order as LIVE and cancelling it",
+                        dkey, maker_v.name, err)
+            order.stats["force"] = "send outcome unknown"
+        await self._maker_lifecycle(maker_v, taker_v, plan, order)
+
+    async def _maker_lifecycle(self, maker_v, taker_v, plan: MakerPlan,
+                               order: MakerOrder) -> None:
+        """Watch one resting order to a resolved end.
+
+        The loop does exactly four things per turn, in this order: read the
+        exchange, act on any new fill, decide whether the quote should still
+        be alive, and enforce the cancel's own budget.
+        """
+        cfg = self.cfg
+        base_poll = max(cfg.maker_poll_sec, 0.05)
+        deadline = order.sent_ts + cfg.maker_timeout_sec
+        cancel_backoff = max(base_poll, 0.5)
+        last_cancel_send = 0.0
+        last_unknown_log = 0.0
+        stop_deadline = None
+        while True:
+            now = time.time()
+            info = await self._poll_maker(maker_v, order)
+            if info is not None:
+                order.apply(info["status"], info.get("filled_base"),
+                            info.get("avg_px"))
+            await self._consume_maker_fill(maker_v, taker_v, order)
+            if order.is_terminal:
+                break
+            reason = self._maker_cancel_reason(maker_v, taker_v, order, now,
+                                               deadline)
+            if reason is not None:
+                first = order.cancel_ts is None
+                if first:
+                    order.stats["cancel_reason"] = reason
+                    log.info("[QUOTE] cancelling — %s | %s", reason,
+                             order.describe())
+                if first or now - last_cancel_send >= cancel_backoff:
+                    order.request_cancel(now)
+                    last_cancel_send = now
+                    if not first:
+                        cancel_backoff = min(cancel_backoff * 2, 5.0)
+                    await self._send_maker_cancel(maker_v, order)
+                # PEER_INFRA S7 must #3. An unconfirmed cancel is not a
+                # cancelled order; it is an order that may have filled. The
+                # engine says so out loud and goes to the chain for the
+                # answer -- reconcile reads real positions, and the net-delta
+                # hedge flattens whatever it finds.
+                if (order.state != mk.UNKNOWN
+                        and order.cancel_overdue(now, cfg.cancel_timeout_sec)):
+                    order.to_unknown(f"cancel unconfirmed after "
+                                     f"{cfg.cancel_timeout_sec:.1f}s")
+                    self.maker_unknown += 1
+                    log.critical(
+                        "MAKER ORDER UNRESOLVED: %s — cancel not confirmed "
+                        "inside its %.1fs budget. Treating it as POSSIBLY "
+                        "FILLED: reconciling against the venue and holding "
+                        "off new quotes until it resolves. / 撤单在预算内未"
+                        "确认，按「可能已成交」处理，改以对帐结果为准",
+                        order.describe(), cfg.cancel_timeout_sec)
+                    self._reconcile_evt.set()
+                    last_unknown_log = now
+            if order.state == mk.UNKNOWN and now - last_unknown_log > 60.0:
+                last_unknown_log = now
+                log.critical("MAKER ORDER STILL UNRESOLVED (%d cancel "
+                             "attempts): %s — still retrying, the engine does "
+                             "not give up", order.cancel_attempts,
+                             order.describe())
+                self._reconcile_evt.set()
+            if self.stop.is_set():
+                if stop_deadline is None:
+                    stop_deadline = now + max(cfg.cancel_timeout_sec * 2, 5.0)
+                elif now > stop_deadline:
+                    log.critical(
+                        "SHUTTING DOWN WITH AN UNRESOLVED MAKER ORDER: %s — "
+                        "check the venue by hand before restarting / 关机时仍"
+                        "有未解决的挂单，请手动到交易所确认", order.describe())
+                    break
+            await asyncio.sleep(base_poll if order.state != mk.UNKNOWN
+                                else max(base_poll, 2.0))
+        await self._finish_maker(maker_v, taker_v, plan, order)
+
+    async def _poll_maker(self, maker_v, order: MakerOrder):
+        """One read of exchange truth, or None when we learned nothing.
+
+        "Learned nothing" is a real answer and it is never upgraded into
+        "the order is gone" -- that is the assumption this whole path exists
+        to avoid.
+        """
+        if order.handle is None:
+            return None
+        try:
+            info = await maker_v.poll_order(order.handle)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                  # noqa: BLE001
+            log.warning("[%s] order poll failed: %r", maker_v.name, e)
+            return None
+        if not info or info.get("status") in (None, "", "unknown"):
+            return None
+        return info
+
+    async def _send_maker_cancel(self, maker_v, order: MakerOrder) -> None:
+        # Counts toward the venue's send budget but is never blocked by it:
+        # an engine that cannot cancel is an engine that cannot stop.
+        self._record_send(maker_v)
+        try:
+            async with self._vlock(maker_v.key):
+                res = await maker_v.cancel_order(order.handle)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                  # noqa: BLE001
+            log.warning("[%s] cancel raised: %r", maker_v.name, e)
+            return
+        st = res.get("status")
+        if st == "rejected":
+            log.warning("[%s] cancel rejected: %s", maker_v.name, res.get("err"))
+        elif st == "gone":
+            # Off the book -- but "gone" does not say whether it filled or
+            # was cancelled, so it resolves nothing. The next poll does.
+            log.info("[%s] cancel: order already off the book (%s) — polling "
+                     "for its outcome", maker_v.name, res.get("err"))
+        if str(res.get("err") or "").startswith("RATE_LIMITED"):
+            self._mark_limited(maker_v)
+
+    def _maker_cancel_reason(self, maker_v, taker_v, order: MakerOrder,
+                             now: float, deadline: float):
+        """Why this quote should come off the book, or None to leave it."""
+        cfg = self.cfg
+        forced = order.stats.get("force")
+        if forced:
+            return forced
+        if self.stop.is_set():
+            return "shutdown"
+        if self.halted:
+            return "engine halted — no new exposure"
+        if now >= deadline:
+            return f"unfilled after {cfg.maker_timeout_sec:.1f}s"
+        if maker_v.key in self._venue_down or taker_v.key in self._venue_down:
+            return "venue outage"
+        if not taker_v.book.is_fresh(cfg.staleness_sec):
+            return "hedge book stale — a fill we could not hedge"
+        if not maker_v.book.is_fresh(cfg.staleness_sec):
+            return "own book stale — quoting blind"
+        if self._venue_limited(taker_v):
+            return "hedge venue rate limited"
+        residual = order.residual
+        if residual <= 0:
+            return None
+        edge = maker_edge_bps(order.px, order.is_buy, taker_v.book,
+                              maker_fee_bps=maker_v.maker_fee_bps,
+                              hedge_fee_bps=taker_v.fee_bps, qty=residual)
+        if edge is None:
+            return "hedge depth gone"
+        if edge < cfg.maker_min_edge_bps:
+            return (f"edge decayed to {edge:+.2f} bps "
+                    f"(floor {cfg.maker_min_edge_bps:+.2f})")
+        # Stolen from XEMM and pointed at a RESTING order, where it belongs:
+        # an edge that suddenly looks wonderful usually means our own quote
+        # is the stale one and somebody is about to take it.
+        if cfg.max_edge_bps > 0 and edge > cfg.max_edge_bps:
+            return (f"edge {edge:.1f} bps exceeds max_edge_bps "
+                    f"{cfg.max_edge_bps:.1f} — the book is wrong, and a stale "
+                    f"book means WE are the stale quote")
+        return None
+
+    async def _consume_maker_fill(self, maker_v, taker_v,
+                                  order: MakerOrder) -> None:
+        """Book any new fill, then hedge what is hedgeable. Must #2."""
+        new = order.unapplied
+        if new > 0:
+            px = order.fill_px
+            fee = maker_v.maker_fee_bps / 1e4
+            if order.is_buy:
+                maker_v.position += new
+                maker_v.cash -= new * px * (1.0 + fee)
+            else:
+                maker_v.position -= new
+                maker_v.cash += new * px * (1.0 - fee)
+            maker_v.volume_usd += new * px
+            maker_v.last_traded_ts = time.time()
+            order.mark_applied(new)
+            order.stats.setdefault("first_fill_ts", time.time())
+            if order.stats.get("mid_at_fill") is None:
+                order.stats["mid_at_fill"] = taker_v.book.mid()
+            log.warning("[QUOTE FILL] %s %s %.6g of %.6g @%.6g (%s) — hedging",
+                        maker_v.name, "BUY" if order.is_buy else "SELL",
+                        order.filled_base, order.qty, px, order.status or "-")
+        pend = order.unhedged
+        if pend <= 0:
+            return
+        px = order.fill_px
+        # The floor here is the HEDGE VENUE's minimum, not the strategy's
+        # min_order_notional: this is not a decision to open a position, it
+        # is the completion of one that already exists.
+        too_small = (pend < max(taker_v.min_base, self._step)
+                     or pend * px < taker_v.min_quote)
+        if too_small:
+            if not order.is_terminal:
+                return          # let later fills accumulate past the minimum
+            log.warning("[QUOTE] %.6g unhedged on %s is below %s's minimum "
+                        "order size — the net-delta hedge owns it from here",
+                        pend, maker_v.name, taker_v.name)
+            self._reconcile_evt.set()
+            return
+        order.mark_hedged(pend)   # attempted exactly once, whatever happens
+        await self._hedge_maker_fill(maker_v, taker_v, order, pend)
+
+    async def _hedge_maker_fill(self, maker_v, taker_v, order: MakerOrder,
+                                qty: float) -> None:
+        """Take the other leg for a fill we just received. Never retries:
+        a hedge that fails hands the imbalance to the net-delta path, which
+        is the audited owner of "the legs do not match"."""
+        cfg = self.cfg
+        is_buy = not order.is_buy
+        slip = cfg.leg_slippage_bps / 1e4
+        ref = taker_v.book.best_ask() if is_buy else taker_v.book.best_bid()
+        if ref is None:
+            log.critical("[QUOTE HEDGE] no book on %s for %.6g — leaving it "
+                         "to the net-delta hedge", taker_v.name, qty)
+            self._reconcile_evt.set()
+            return
+        limit = (taker_v.px_round(ref * (1 + slip), True) if is_buy
+                 else taker_v.px_round(ref * (1 - slip), False))
+        t0 = time.time()
+        try:
+            async with self._vlock(taker_v.key):
+                self._record_send(taker_v)
+                info = await taker_v.send_taker(is_buy=is_buy, qty=qty,
+                                                limit_px=limit)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                  # noqa: BLE001
+            info = {"status": "send-failed", "filled_base": 0.0,
+                    "avg_px": None, "err": repr(e), "unresolved": True}
+        order.stats["hedge_ms"] = (time.time() - t0) * 1e3
+        fill = float(info.get("filled_base") or 0.0)
+        if fill:
+            px = info.get("avg_px") or limit
+            fee = taker_v.fee_bps / 1e4
+            if is_buy:
+                taker_v.position += fill
+                taker_v.cash -= fill * px * (1.0 + fee)
+            else:
+                taker_v.position -= fill
+                taker_v.cash += fill * px * (1.0 - fee)
+            taker_v.volume_usd += fill * px
+            matched = min(qty, fill)
+            mpx, hpx = order.fill_px, (info.get("avg_px") or limit)
+            mfee, hfee = maker_v.maker_fee_bps / 1e4, fee
+            edge = (matched * (mpx * (1.0 - mfee) - hpx * (1.0 + hfee))
+                    if not order.is_buy else
+                    matched * (hpx * (1.0 - hfee) - mpx * (1.0 + mfee)))
+            order.stats["fill_edge"] = order.stats.get("fill_edge", 0.0) + edge
+            self.total_fill_edge += edge
+        taker_v.last_traded_ts = time.time()
+        log.info("[QUOTE HEDGE] %s %s %.6g/%.6g %s in %.0f ms",
+                 taker_v.name, "BUY" if is_buy else "SELL", fill, qty,
+                 info.get("status"), order.stats["hedge_ms"])
+        if info.get("err") or info.get("unresolved"):
+            log.error("[QUOTE HEDGE] %s: %s — the net-delta hedge takes over",
+                      taker_v.name, info.get("err") or "unresolved")
+            if str(info.get("err") or "").startswith("RATE_LIMITED"):
+                self._mark_limited(taker_v)
+            else:
+                self.consec_errors += 1
+                if self.consec_errors >= cfg.max_consecutive_errors:
+                    self._risk_halt(f"{self.consec_errors} consecutive "
+                                    f"execution problems")
+            self._reconcile_evt.set()
+        else:
+            self.consec_errors = 0
+
+    async def _finish_maker(self, maker_v, taker_v, plan: MakerPlan,
+                            order: MakerOrder) -> None:
+        """Retire one quote. The order leaves _maker_open ONLY when the
+        exchange resolved it -- an `unknown` order keeps blocking new quotes,
+        which is the intended consequence of not knowing."""
+        filled = order.filled_base
+        if order.is_terminal:
+            outcome = "filled" if filled > 0 else "cancelled"
+            self._maker_open.pop(maker_v.key, None)
+        elif self.stop.is_set():
+            outcome = "unresolved-at-shutdown"
+            self._maker_open.pop(maker_v.key, None)
+        else:
+            outcome = "unresolved"
+        if filled > 0:
+            self.maker_fills += 1
+            self.trades += 1
+            self.total_exp_edge += plan.exp_edge_usd * (filled / plan.qty
+                                                        if plan.qty else 0.0)
+        elif outcome == "cancelled":
+            self.maker_cancels += 1
+        log.info("[QUOTE DONE] %s — %s", outcome, order.describe())
+        self.recent_trades.append({
+            "ts": time.time(), "direction": order.stats.get("dkey", "?"),
+            "qty": filled or plan.qty, "notional": filled * order.fill_px,
+            "prem_bps": plan.edge_bps, "exp": plan.exp_edge_usd,
+            "fill": order.stats.get("fill_edge"),
+            "status": f"maker/{outcome}", "ok": outcome != "unresolved"})
+        self._log_maker_csv(maker_v, taker_v, plan, order, outcome)
+        self.last_trade_ts = time.time()
+        # A resolved quote is a good moment to check the legs against each
+        # other -- and the only moment that matters after a partial fill.
+        await self._maybe_hedge()
+
+    def _log_maker_csv(self, maker_v, taker_v, plan: MakerPlan,
+                       order: MakerOrder, outcome: str) -> None:
+        st = order.stats
+        now = time.time()
+        first_fill = st.get("first_fill_ts")
+        self._append_csv(self.cfg.maker_csv, MAKER_CSV_HEADER, [
+            f"{now:.3f}", st.get("dkey", "?"), maker_v.name, taker_v.name,
+            "BUY" if order.is_buy else "SELL",
+            f"{order.px:.8g}", f"{order.qty:.8g}", f"{order.filled_base:.8g}",
+            f"{order.hedged_base:.8g}", order.status or "-", outcome,
+            f"{plan.edge_bps:.3f}", f"{plan.exp_edge_usd:.4f}",
+            f"{st.get('fill_edge', 0.0):.4f}",
+            f"{(now - order.sent_ts) * 1e3:.0f}",
+            f"{(first_fill - order.sent_ts) * 1e3:.0f}" if first_fill else "",
+            f"{st.get('hedge_ms', 0.0):.0f}" if st.get("hedge_ms") else "",
+            f"{(now - order.cancel_ts) * 1e3:.0f}" if order.cancel_ts else "",
+            order.cancel_attempts, st.get("cancel_reason", ""),
+            f"{st['mid_at_fill']:.8g}" if st.get("mid_at_fill") else "",
+        ])
+
+    async def _cancel_stale_orders(self) -> None:
+        """Startup sweep: nobody may trade on top of orders they do not own.
+
+        A process that died with a quote on the book leaves an order that
+        will fill with no one to hedge it -- the same naked exposure as a
+        lost cancel, minus the log line. Failure here is fatal by design:
+        the alternative is trading beside an order we cannot account for.
+        """
+        for v in self.venues.values():
+            n = await v.cancel_open_orders()
+            if n:
+                log.critical("[%s] cancelled %d pre-existing resting order(s) "
+                             "before start", v.name, n)
 
     # Risk switches that must be explicitly chosen before real money moves.
     # None has a defensible universal default -- the dollar ones depend on
@@ -1001,30 +1572,35 @@ class Engine:
                      self.total_exp_edge, self.total_fill_edge, rec,
                      " *** HALTED ***" if self.halted else "")
 
-    def _log_csv(self, direction, buy, sell, plan: ArbPlan, ok: bool, bfill,
-                 sfill, bstatus, sstatus, fill_edge, inv_bps) -> None:
+    def _append_csv(self, path: str, header: list, row: list) -> None:
+        """Append one row, rotating the file if its header no longer matches.
+        Never raises: a log write must not be able to stop trading."""
         try:
-            path = self.cfg.trades_csv
             d = os.path.dirname(path)
             if d:
                 os.makedirs(d, exist_ok=True)
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as fh0:
-                    if fh0.readline().strip() != ",".join(CSV_HEADER):
+                    if fh0.readline().strip() != ",".join(header):
                         os.replace(path, path + ".old")
-            new = not os.path.exists(path)
+            fresh = not os.path.exists(path)
             with open(path, "a", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
-                if new:
-                    w.writerow(CSV_HEADER)
-                w.writerow([f"{time.time():.3f}",
-                            direction, buy.name, sell.name, f"{plan.qty:.8g}",
-                            plan.buy_limit, plan.sell_limit,
-                            f"{plan.buy_notional:.2f}", f"{plan.sell_notional:.2f}",
-                            f"{plan.exp_edge_usd:.4f}", f"{plan.gross_edge_usd:.4f}",
-                            f"{plan.marginal_premium_bps:.3f}",
-                            f"{self.cfg.midline_bps:.3f}",
-                            f"{inv_bps:.3f}", int(ok), f"{bfill:.8g}",
-                            f"{sfill:.8g}", bstatus, sstatus, f"{fill_edge:.4f}"])
+                if fresh:
+                    w.writerow(header)
+                w.writerow(row)
         except Exception:
             log.exception("csv write failed")
+
+    def _log_csv(self, direction, buy, sell, plan: ArbPlan, ok: bool, bfill,
+                 sfill, bstatus, sstatus, fill_edge, inv_bps) -> None:
+        self._append_csv(self.cfg.trades_csv, CSV_HEADER, [
+            f"{time.time():.3f}",
+            direction, buy.name, sell.name, f"{plan.qty:.8g}",
+            plan.buy_limit, plan.sell_limit,
+            f"{plan.buy_notional:.2f}", f"{plan.sell_notional:.2f}",
+            f"{plan.exp_edge_usd:.4f}", f"{plan.gross_edge_usd:.4f}",
+            f"{plan.marginal_premium_bps:.3f}",
+            f"{self.cfg.midline_bps:.3f}",
+            f"{inv_bps:.3f}", int(ok), f"{bfill:.8g}",
+            f"{sfill:.8g}", bstatus, sstatus, f"{fill_edge:.4f}"])

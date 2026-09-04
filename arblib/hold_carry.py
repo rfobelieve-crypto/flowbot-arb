@@ -59,7 +59,7 @@ try:
 except Exception:
     pass
 
-OUT = HERE.parents[1] / "research" / "results" / "arb_hold_carry.json"
+OUT = HERE.parent / "results" / "arb_hold_carry.json"  # arb/ repo root
 MAX_HOLD_H = 24.0
 MIN_EPISODES = 5
 
