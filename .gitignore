@@ -17,3 +17,9 @@ __pycache__/
 venv/
 .pytest_cache/
 *.egg-info/
+
+# 第三方參考原始碼（使用者放進來當範例，2026-09-05）：讀它、不提交它。
+# 它們有自己的 LICENSE 與自己的上游，混進本 repo 的歷史會讓「哪些程式是
+# 我們的」這個問題永遠答不清楚——而那正是 PEER_INFRA 的紀律要保住的東西。
+entropy-arb-main/
+perp-dex-tools-main/
