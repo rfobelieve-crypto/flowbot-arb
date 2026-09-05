@@ -4,6 +4,16 @@
 > flow_system 那邊只剩兩座唯讀顯示橋（`research/arb_home.py` 是唯一知道
 > 這裡在哪的檔案）——**本 repo 永不讀 flow_system、永不碰它的 MySQL**。
 >
+> **從量化線交接過來的一個測試（2026-09-05 晚）**：flow_system 用 Binance 現貨
+> BTC 的 1m L1 快照跑了「無條件掛單 markout」（每 3 分鐘雙邊各一張，T=60）——
+> 成交 93%、**每筆 −3.1 bps、CI [−3.4, −2.8]**：守得最緊的場館對被動單有毒。
+> 「去沒人守的地方」的可量化版本，就是把**同一個測試**拿到本 repo 錄的
+> `engine/logs/*/minutes.csv`（Lighter／HIP-3／trade.xyz 的 top-of-book）上跑：
+> 無條件掛單的 markout 若接近零或為正，小場館被動策略就有存在性；若也是負的，
+> 那裡也有人守。判準與程式照 `flow_system/research/subhourly/PREREG_passive_markout.md`
+> 與 `passive_markout_test.py`（讀取層換成 minutes.csv 即可）。這是 B3 掛單路徑
+> 該不該做的前置判定——**先量毒性，再蓋掛單**。
+
 > **今天落地的判決**：SNDK 錄滿 7.03 天、過閘——但只在零費率假設下。
 > 實測帶 2.06 bps、收斂 98%（中位 6 分鐘）；費率表要求 13.5 bps → 扣費後
 > 每筆為負。判決文原話：「判準沒被改，是它的前提被推翻了。要救這條線只有
