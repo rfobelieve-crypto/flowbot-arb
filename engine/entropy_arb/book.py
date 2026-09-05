@@ -75,8 +75,35 @@ class OrderBook:
         return (max(self.bids) + min(self.asks)) / 2.0
 
     def is_fresh(self, max_age_sec: float) -> bool:
+        """Recent enough to describe the market. Says nothing about whether
+        it makes SENSE -- see is_crossed(). Deliberately unchanged: the
+        recorder counts `samples` with this, and the recording family is
+        mid-gate; moving what counts as a sample would move the instrument
+        under a measurement already in flight."""
         return self.ready and bool(self.bids) and bool(self.asks) and (
             time.time() - self.alive_ts <= max_age_sec)
+
+    def is_crossed(self) -> bool:
+        """Best bid at or above best ask: this book is broken.
+
+        No venue quotes a crossed book. When ours shows one it is our copy
+        that is wrong -- a diff whose deletion we missed, a partially applied
+        update, a level that should have gone. Acting on it means acting on a
+        fiction, and the fiction is specifically the kind that LOOKS like free
+        money (a negative spread reads as an instant profit).
+
+        Found 2026-09-05 by reading perp-dex-tools, which refuses a crossed
+        book before every price decision (`trading_bot.py:458`). We refused
+        it only when placing a maker quote, and only on the venue we were
+        quoting -- the taker, hedge and flatten paths did not check at all.
+        """
+        if not self.bids or not self.asks:
+            return False
+        return max(self.bids) >= min(self.asks)
+
+    def tradeable(self, max_age_sec: float) -> bool:
+        """Fresh AND sane. Every path that sends an order asks this."""
+        return self.is_fresh(max_age_sec) and not self.is_crossed()
 
 
 def floor_step(x: float, step: float) -> float:
@@ -165,6 +192,10 @@ def plan_arb(buy_book: OrderBook, sell_book: OrderBook, *, threshold_bps: float,
     bids = sell_book.sorted_bids()
     if not asks or not bids:
         return None, "empty_book"
+    if buy_book.is_crossed() or sell_book.is_crossed():
+        # Defence in depth: the callers gate on tradeable(), but a crossed
+        # book reads as free money and must not be one guard deep.
+        return None, "crossed_book"
     threshold = threshold_bps / 1e4
     buy_fee = buy_fee_bps / 1e4
     sell_fee = sell_fee_bps / 1e4

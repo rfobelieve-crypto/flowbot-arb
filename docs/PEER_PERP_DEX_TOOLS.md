@@ -183,6 +183,37 @@ if status == 'PARTIALLY_FILLED':
 
 ---
 
+## 六之二、讀 `trading_bot.py` 找到我們的一個洞（已修）
+
+`trading_bot.py` 本身是單場館的網格／止盈 bot，不是套利，直接可比的不多。
+但它每次做價格決策前都先做這一步（`:457-459`）：
+
+```python
+best_bid, best_ask = await self.exchange_client.fetch_bbo_prices(...)
+if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
+    raise ValueError("No bid/ask data available")
+```
+
+**`best_bid >= best_ask` —— 交叉簿口，它拒絕。** 回頭查我們：
+
+| 路徑 | 修之前 |
+|---|---|
+| `OrderBook.is_fresh()` | ❌ 只看新鮮度，不看合理性 |
+| `plan_arb`（吃單） | ❌ 完全沒查 |
+| `plan_maker`（掛單） | ⚠ 只查掛單那一腿，不查對沖腿 |
+| `_hedge` / `_flatten_step` | ❌ 只用 `is_fresh` |
+
+**沒有任何交易所會報交叉簿口——我們的簿口交叉時，錯的是我們自己那份副本**
+（漏掉一筆刪除的 diff、半套用的更新、該消失卻留著的檔位）。而這種錯誤特別
+危險：**負價差讀起來就是「立刻有錢賺」**。
+
+修法：新增 `is_crossed()` 與 `tradeable() = is_fresh() and not is_crossed()`，
+**六條會送單的路徑全部改用 `tradeable()`**；`plan_arb` 自己再擋一層。
+
+**`is_fresh()` 刻意不動**——錄價器用它數 `samples`，而錄製家族正在閘門中，
+改變「什麼算一筆樣本」等於在量測進行中換掉儀器。六個新測試釘住這件事，
+包括一個專門斷言 `is_fresh` 對交叉簿口仍然回 True。
+
 ## 七、一句話
 
 **上一次的結論「執行語意比 Hummingbot 正確、風控薄」大方向沒錯，但

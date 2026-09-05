@@ -567,8 +567,8 @@ class Engine:
         best = None
         for buy, sell, dkey in ((self.hedge, self.entropy, "sell_entropy"),
                                 (self.entropy, self.hedge, "buy_entropy")):
-            fresh = (buy.book.is_fresh(cfg.staleness_sec)
-                     and sell.book.is_fresh(cfg.staleness_sec))
+            fresh = (buy.book.tradeable(cfg.staleness_sec)
+                     and sell.book.tradeable(cfg.staleness_sec))
             if fresh:
                 self._stale_streak = 0
                 self._stale_episode_open = False
@@ -798,8 +798,8 @@ class Engine:
         if self._maker_open:
             return None
         maker_v, taker_v = self._maker_legs()
-        fresh = (maker_v.book.is_fresh(cfg.staleness_sec)
-                 and taker_v.book.is_fresh(cfg.staleness_sec))
+        fresh = (maker_v.book.tradeable(cfg.staleness_sec)
+                 and taker_v.book.tradeable(cfg.staleness_sec))
         if fresh:
             self._stale_streak = 0
             self._stale_episode_open = False
@@ -1143,10 +1143,10 @@ class Engine:
             return f"unfilled after {cfg.maker_timeout_sec:.1f}s"
         if maker_v.key in self._venue_down or taker_v.key in self._venue_down:
             return "venue outage"
-        if not taker_v.book.is_fresh(cfg.staleness_sec):
-            return "hedge book stale — a fill we could not hedge"
-        if not maker_v.book.is_fresh(cfg.staleness_sec):
-            return "own book stale — quoting blind"
+        if not taker_v.book.tradeable(cfg.staleness_sec):
+            return "hedge book stale or crossed — a fill we could not hedge"
+        if not maker_v.book.tradeable(cfg.staleness_sec):
+            return "own book stale or crossed — quoting blind"
         if self._venue_limited(taker_v):
             return "hedge venue rate limited"
         residual = order.residual
@@ -1460,9 +1460,9 @@ class Engine:
             if v.key in self._venue_down:
                 log.warning("[FLAT] %s unreachable — retrying", v.name)
                 continue
-            if not v.book.is_fresh(cfg.staleness_sec):
-                log.warning("[FLAT] %s book stale — will not close blind",
-                            v.name)
+            if not v.book.tradeable(cfg.staleness_sec):
+                log.warning("[FLAT] %s book stale or crossed — will not close "
+                            "blind", v.name)
                 continue
             lk = self._vlock(v.key)
             if lk.locked():
@@ -1837,8 +1837,8 @@ class Engine:
             if v.position * sgn <= 0:
                 continue
             if v.key in self._venue_down \
-                    or not v.book.is_fresh(cfg.staleness_sec):
-                continue  # unreachable or blind: cannot hedge here
+                    or not v.book.tradeable(cfg.staleness_sec):
+                continue  # unreachable, blind, or a crossed (broken) book
             lk = self._vlock(v.key)
             if lk.locked():
                 continue

@@ -267,3 +267,63 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name:52s} OK")
+
+
+# ------------------------------------------------------- 交叉（壞掉）簿口
+
+def _cross(v):
+    """Make one venue quote a crossed book: bid at or above ask."""
+    v.set_book(100.20, 100.14)          # bid > ask
+
+
+def test_a_crossed_book_is_not_tradeable():
+    """No venue quotes a crossed book; when ours shows one, our copy is
+    wrong. The fiction specifically LOOKS like free money."""
+    eng = taker_engine()
+    _cross(eng.entropy)
+    assert eng.entropy.book.is_crossed()
+    assert eng.entropy.book.is_fresh(10.0), "still recent — only not sane"
+    assert not eng.entropy.book.tradeable(10.0)
+
+
+def test_a_crossed_book_stops_new_exposure():
+    eng = taker_engine()
+    _cross(eng.entropy)
+    assert plan_taker(eng) is None, "planned a trade on a crossed book"
+
+
+def test_plan_arb_refuses_a_crossed_book_on_its_own():
+    """Defence in depth: the callers gate on tradeable(), but a negative
+    spread must not be one guard deep."""
+    from entropy_arb.book import plan_arb
+    eng = taker_engine()
+    _cross(eng.hedge)
+    plan, why = plan_arb(eng.hedge.book, eng.entropy.book, threshold_bps=0.0,
+                         buy_fee_bps=0.0, sell_fee_bps=0.0, take_fraction=0.5,
+                         cap_notional=100.0, min_base=1e-4, min_notional=1.0,
+                         size_step=1e-4)
+    assert plan is None and why == "crossed_book"
+
+
+def test_a_crossed_book_is_not_hedged_into():
+    eng = taker_engine(max_net_base=1e6)
+    eng.entropy.position = 1.0
+    _cross(eng.entropy)
+    run(eng._maybe_hedge())
+    assert not eng.entropy.sent_takers, "hedged into a broken book"
+
+
+def test_a_crossed_book_is_not_flattened_into():
+    eng = taker_engine(max_net_base=1e6)
+    eng.entropy.position = 1.0
+    _cross(eng.entropy)
+    assert run(eng._flatten_step()) is False
+    assert not eng.entropy.sent_takers, "closed into a broken book"
+
+
+def test_the_recorder_measure_is_untouched():
+    """is_fresh() still means 'recent', because the recorder counts samples
+    with it and the recording family is mid-gate."""
+    eng = taker_engine()
+    _cross(eng.entropy)
+    assert eng.entropy.book.is_fresh(10.0) is True
