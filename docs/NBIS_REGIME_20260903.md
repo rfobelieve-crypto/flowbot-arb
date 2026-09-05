@@ -183,3 +183,32 @@ NVDA_LL −3.1、SNDK −1.9。
 **正確的做法本來就寫在 README 裡**：midline 要填**量到的中樞**，帶是繞著
 它的偏離。`tools/analyze.py` 每個配對都算得出來。**但這件事在 09-06
 各配對的閘門到期之前不該急著改**——見第七節第 2 點的同一個理由。
+
+### 十、第三個選項（2026-09-05 從別人的程式碼讀到）
+
+第五節說「改成 +10 是押注 regime 不再變，維持 0 是押注它會回來，兩個都是
+押注」。**還有第三個：不押注。**
+
+entropy-arb 的作者在他另一支程式裡就是這樣做的
+（`perp-dex-tools/hedge/hedge_mode_grvt_v2.py:1290-1297`）：
+
+```python
+spread_history.append(lighter_best_bid - grvt_best_bid)
+if len(spread_history) > 1000:
+    median_val = statistics.median(data)
+    long_threshold  =   median_val + best_ask * 0.0002     # 中樞 + 2 bps
+    short_threshold = -(median_val - best_ask * 0.0002)    # 中樞 − 2 bps
+else:
+    continue        # 樣本不足 1000 筆之前完全不交易
+```
+
+**中樞是滾動中位數，不是設定檔常數。** 15 bps 的階躍會在 1000 筆樣本內
+被吸收掉。同一個作者、我們的上游用固定中樞、他的 v2 用自適應——
+**方向由那個 "v2" 說明。**
+
+**但它換掉一種風險換來另一種**：滾動中樞會跟著階躍走，**包括跟著一個
+我們本來應該拒絕交易的壞掉市場走**。固定中樞至少會在 `max_edge_bps`
+撞牆。要採用就得連它自己的守衛一起設計。細節見
+`PEER_PERP_DEX_TOOLS.md` §四。
+
+**09-06 過閘之後當成明確提案評估，不是今天偷偷加。**
