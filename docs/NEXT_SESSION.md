@@ -11,8 +11,9 @@
 > `engine/logs/*/minutes.csv`（Lighter／HIP-3／trade.xyz 的 top-of-book）上跑：
 > 無條件掛單的 markout 若接近零或為正，小場館被動策略就有存在性；若也是負的，
 > 那裡也有人守。判準與程式照 `flow_system/research/subhourly/PREREG_passive_markout.md`
-> 與 `passive_markout_test.py`（讀取層換成 minutes.csv 即可）。這是 B3 掛單路徑
-> 該不該做的前置判定——**先量毒性，再蓋掛單**。
+> 與 `passive_markout_test.py`。**已直接寫成本 repo 的 `arblib/venue_toxicity.py`**（吃 minutes.csv，兩腿各跑，
+> `python arblib/venue_toxicity.py --pair NBIS`），這是 B3 掛單路徑該不該做的前置判定——
+> **先量毒性，再蓋掛單**。
 
 > **今天落地的判決**：SNDK 錄滿 7.03 天、過閘——但只在零費率假設下。
 > 實測帶 2.06 bps、收斂 98%（中位 6 分鐘）；費率表要求 13.5 bps → 扣費後
