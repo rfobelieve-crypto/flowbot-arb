@@ -98,7 +98,7 @@
 | 下單路徑逐行審 | `docs/B1_ENGINE_AUDIT.md`、`docs/B3_MAKER_AUDIT.md` |
 | 風控數字怎麼來的 | `docs/RISK_NUMBERS.md` |
 | $50 實盤週的凍結規格 | `docs/LIVE_50U_SPEC.md` |
-| 別人的基礎設施對照 | `docs/PEER_INFRA.md` |
+| 別人的基礎設施對照 | `docs/PEER_INFRA.md`、`docs/PEER_PERP_DEX_TOOLS.md` |
 | 熱路徑稽核 | `docs/HOTPATH_AUDIT.md` |
 | 場館三層清單 | `docs/VENUES.md` |
 | 部署架構（AWS 引擎 / Vercel 儀表板） | `docs/DEPLOY.md` |
