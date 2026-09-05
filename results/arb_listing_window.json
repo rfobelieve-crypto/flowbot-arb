@@ -1,8 +1,8 @@
 {
- "events": 17,
- "pairs_matched": 20,
+ "events": 22,
+ "pairs_matched": 39,
  "measured": 0,
- "control_median_ratio": 0.55,
+ "control_median_ratio": 0.46,
  "control_n": 108,
  "bars": {
   "P1 新配對 <24h 帶 ≥ 2.0× >72h": false,

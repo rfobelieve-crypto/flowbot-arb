@@ -63,7 +63,10 @@ try:
 except Exception:
     pass
 
-ROOT = HERE.parents[1]
+# 2026-09-05: HERE.parents[1] was right when this lived at
+# flow_system/research/arb/ — after the split it points one level ABOVE
+# the repo (flowbot/), so every read and write missed. arb/ is HERE.parent.
+ROOT = HERE.parent
 OUT = ROOT / "results" / "arb_session_window.json"
 WINDOWS = {"OPEN": (13.5, 15.5), "RTH": (15.5, 20.0), "PRE": (8.0, 13.5)}
 PAIRS = [p for p in PV.PAIRS if p[0] in ("SNDK", "NBIS", "ANTH")]

@@ -2,17 +2,17 @@
  "pairs": {
   "SNDK": {
    "sell": {
-    "n": 203,
-    "carried": 28,
-    "band": 2.05,
-    "base_mean": -5.727,
-    "hold_mean": -5.555,
-    "gain": 0.172,
+    "n": 208,
+    "carried": 33,
+    "band": 2.07,
+    "base_mean": -5.716,
+    "hold_mean": -5.482,
+    "gain": 0.234,
     "halves": [
      0.0,
-     0.343
+     0.468
     ],
-    "median_hold_h": 0.1
+    "median_hold_h": 0.12
    },
    "buy": {
     "n": 4,
@@ -21,21 +21,39 @@
   },
   "NBIS": {
    "sell": {
-    "n": 4,
-    "skip": "episodes < 5"
+    "n": 7,
+    "carried": 4,
+    "band": 13.4,
+    "base_mean": -0.051,
+    "hold_mean": 6.143,
+    "gain": 6.194,
+    "halves": [
+     8.688,
+     4.324
+    ],
+    "median_hold_h": 1.07
    },
    "buy": {
-    "n": 4,
-    "skip": "episodes < 5"
+    "n": 7,
+    "carried": 4,
+    "band": 13.17,
+    "base_mean": -0.163,
+    "hold_mean": 6.095,
+    "gain": 6.258,
+    "halves": [
+     8.763,
+     4.38
+    ],
+    "median_hold_h": 1.07
    }
   },
   "ANTH": {
    "sell": {
     "n": 5,
     "carried": 0,
-    "band": 15.31,
-    "base_mean": 0.906,
-    "hold_mean": 0.906,
+    "band": 15.89,
+    "base_mean": 1.194,
+    "hold_mean": 1.194,
     "gain": 0.0,
     "halves": [
      0.0,
@@ -44,17 +62,17 @@
     "median_hold_h": 0.12
    },
    "buy": {
-    "n": 10,
-    "carried": 2,
-    "band": 10.57,
-    "base_mean": -1.463,
-    "hold_mean": -0.219,
-    "gain": 1.244,
+    "n": 27,
+    "carried": 1,
+    "band": 9.52,
+    "base_mean": -1.989,
+    "hold_mean": -1.788,
+    "gain": 0.201,
     "halves": [
      0.0,
-     2.487
+     0.388
     ],
-    "median_hold_h": 0.24
+    "median_hold_h": 0.08
    }
   },
   "BTC": {
@@ -63,17 +81,17 @@
     "skip": "episodes < 5"
    },
    "buy": {
-    "n": 317,
-    "carried": 88,
-    "band": 1.0,
-    "base_mean": -8.5,
-    "hold_mean": -8.287,
-    "gain": 0.213,
+    "n": 200,
+    "carried": 57,
+    "band": 1.43,
+    "base_mean": -8.284,
+    "hold_mean": -8.022,
+    "gain": 0.261,
     "halves": [
-     0.018,
-     0.406
+     0.147,
+     0.375
     ],
-    "median_hold_h": 0.08
+    "median_hold_h": 0.1
    }
   },
   "HYPE": {
@@ -82,35 +100,35 @@
     "skip": "episodes < 5"
    },
    "buy": {
-    "n": 21,
-    "carried": 14,
-    "band": 3.95,
-    "base_mean": -7.025,
-    "hold_mean": -5.755,
-    "gain": 1.27,
+    "n": 29,
+    "carried": 15,
+    "band": 3.81,
+    "base_mean": -7.095,
+    "hold_mean": -6.009,
+    "gain": 1.087,
     "halves": [
-     1.672,
-     0.904
+     1.404,
+     0.791
     ],
-    "median_hold_h": 0.2
+    "median_hold_h": 0.27
    }
   },
   "ZEC": {
    "sell": {
-    "n": 34,
-    "carried": 12,
-    "band": 5.31,
-    "base_mean": -6.344,
-    "hold_mean": -5.709,
-    "gain": 0.634,
+    "n": 17,
+    "carried": 8,
+    "band": 6.98,
+    "base_mean": -5.511,
+    "hold_mean": -3.685,
+    "gain": 1.826,
     "halves": [
      0.0,
-     1.268
+     3.45
     ],
-    "median_hold_h": 0.46
+    "median_hold_h": 0.53
    },
    "buy": {
-    "n": 1,
+    "n": 2,
     "skip": "episodes < 5"
    }
   },
@@ -120,17 +138,17 @@
     "skip": "episodes < 5"
    },
    "buy": {
-    "n": 259,
-    "carried": 62,
+    "n": 292,
+    "carried": 77,
     "band": 1.0,
     "base_mean": -8.5,
-    "hold_mean": -8.252,
-    "gain": 0.248,
+    "hold_mean": -8.211,
+    "gain": 0.289,
     "halves": [
-     0.0,
-     0.494
+     0.053,
+     0.524
     ],
-    "median_hold_h": 0.08
+    "median_hold_h": 0.07
    }
   },
   "GOLD_LL": {
@@ -139,23 +157,32 @@
     "skip": "episodes < 5"
    },
    "buy": {
-    "n": 1,
-    "skip": "episodes < 5"
+    "n": 10,
+    "carried": 1,
+    "band": 1.0,
+    "base_mean": 0.5,
+    "hold_mean": 0.712,
+    "gain": 0.212,
+    "halves": [
+     0.423,
+     0.0
+    ],
+    "median_hold_h": 0.16
    }
   },
   "NVDA_LL": {
    "sell": {
-    "n": 43,
-    "carried": 20,
+    "n": 71,
+    "carried": 32,
     "band": 1.0,
     "base_mean": 0.5,
-    "hold_mean": 0.879,
-    "gain": 0.379,
+    "hold_mean": 0.858,
+    "gain": 0.358,
     "halves": [
-     0.288,
-     0.466
+     0.392,
+     0.324
     ],
-    "median_hold_h": 0.1
+    "median_hold_h": 0.13
    },
    "buy": {
     "n": 0,
@@ -164,19 +191,21 @@
   }
  },
  "by_pair_gain": {
-  "SNDK": 0.172,
-  "ANTH": 1.244,
-  "BTC": 0.213,
-  "HYPE": 1.27,
-  "ZEC": 0.634,
-  "NEAR": 0.248,
-  "NVDA_LL": 0.379
+  "SNDK": 0.234,
+  "NBIS": 6.258,
+  "ANTH": 0.201,
+  "BTC": 0.261,
+  "HYPE": 1.087,
+  "ZEC": 1.826,
+  "NEAR": 0.289,
+  "GOLD_LL": 0.212,
+  "NVDA_LL": 0.358
  },
  "bars": {
   "P1 持有路徑優於基準的配對 ≥ 4": true,
   "P2 拿掉最好的那個配對後仍 ≥ 4": true,
   "P3 持有時間中位 < 8h": true
  },
- "median_hold_h": 0.09,
+ "median_hold_h": 0.1,
  "verdict": "存活：開前瞻時鐘"
 }

@@ -54,7 +54,10 @@ try:
 except Exception:
     pass
 
-ROOT = HERE.parents[1]
+# 2026-09-05: HERE.parents[1] was right when this lived at
+# flow_system/research/arb/ — after the split it points one level ABOVE
+# the repo (flowbot/), so every read and write missed. arb/ is HERE.parent.
+ROOT = HERE.parent
 OUT = ROOT / "results" / "arb_cost_model.json"
 
 # ── assumptions, each named so they can be replaced one at a time ──────────

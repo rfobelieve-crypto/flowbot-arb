@@ -17,44 +17,44 @@
   "SNDK": {
    "windows": {
     "OPEN": {
-     "n": 810,
-     "sell_p90": 6.34,
-     "buy_p90": 14.17,
-     "intraminute_range_med": 9.68,
-     "fat_depth_med_usd": 99.91
+     "n": 930,
+     "sell_p90": 7.39,
+     "buy_p90": 13.98,
+     "intraminute_range_med": 10.18,
+     "fat_depth_med_usd": 99.89
     },
     "RTH": {
-     "n": 1665,
-     "sell_p90": 2.83,
-     "buy_p90": 8.73,
-     "intraminute_range_med": 5.79,
-     "fat_depth_med_usd": 97.72
+     "n": 2160,
+     "sell_p90": 2.53,
+     "buy_p90": 9.07,
+     "intraminute_range_med": 6.24,
+     "fat_depth_med_usd": 101.4
     },
     "PRE": {
-     "n": 2138,
-     "sell_p90": 1.14,
-     "buy_p90": 7.73,
-     "intraminute_range_med": 3.88,
-     "fat_depth_med_usd": 83.16
+     "n": 2465,
+     "sell_p90": 1.6,
+     "buy_p90": 7.67,
+     "intraminute_range_med": 4.11,
+     "fat_depth_med_usd": 78.135
     },
     "OFF": {
-     "n": 4320,
-     "sell_p90": 1.35,
-     "buy_p90": 6.54,
-     "intraminute_range_med": 3.1,
-     "fat_depth_med_usd": 99.57
+     "n": 5359,
+     "sell_p90": 1.45,
+     "buy_p90": 6.42,
+     "intraminute_range_med": 3.09,
+     "fat_depth_med_usd": 99.97
     }
    },
-   "open_off_ratio": 2.1666666666666665,
+   "open_off_ratio": 2.177570093457944,
    "conv_open": {
     "sell": {
-     "band": 6.34,
+     "band": 7.39,
      "episodes": 0,
      "converged": 0,
      "frac": null
     },
     "buy": {
-     "band": 14.17,
+     "band": 13.98,
      "episodes": 0,
      "converged": 0,
      "frac": null
@@ -94,18 +94,23 @@
     [
      "2026-09-03",
      14.9,
-     7.66
+     7.39
+    ],
+    [
+     "2026-09-04",
+     13.17,
+     6.24
     ]
    ],
-   "days_open_gt_2x_off": 4,
+   "days_open_gt_2x_off": 6,
    "econ_open_only": {
     "sell": {
-     "net_bps_maker_norebate": 0.17,
+     "net_bps_maker_norebate": 0.69,
      "conv_events_per_day": 0.0,
      "usd_per_day": 0.0
     },
     "buy": {
-     "net_bps_maker_norebate": 4.08,
+     "net_bps_maker_norebate": 3.99,
      "conv_events_per_day": 0.0,
      "usd_per_day": 0.0
     }
@@ -118,44 +123,44 @@
   "NBIS": {
    "windows": {
     "OPEN": {
-     "n": 507,
-     "sell_p90": 12.74,
-     "buy_p90": 20.24,
-     "intraminute_range_med": 17.39,
-     "fat_depth_med_usd": 134.76500000000001
+     "n": 627,
+     "sell_p90": 14.72,
+     "buy_p90": 19.32,
+     "intraminute_range_med": 17.49,
+     "fat_depth_med_usd": 96.45500000000001
     },
     "RTH": {
-     "n": 1125,
-     "sell_p90": 1.5,
-     "buy_p90": 11.85,
-     "intraminute_range_med": 8.48,
-     "fat_depth_med_usd": 279.22
+     "n": 1620,
+     "sell_p90": 13.73,
+     "buy_p90": 10.89,
+     "intraminute_range_med": 9.0,
+     "fat_depth_med_usd": 281.08500000000004
     },
     "PRE": {
-     "n": 1299,
-     "sell_p90": 14.77,
-     "buy_p90": 12.31,
-     "intraminute_range_med": 7.74,
-     "fat_depth_med_usd": 372.86
+     "n": 1627,
+     "sell_p90": 18.67,
+     "buy_p90": 11.32,
+     "intraminute_range_med": 7.66,
+     "fat_depth_med_usd": 336.32500000000005
     },
     "OFF": {
-     "n": 2880,
-     "sell_p90": 2.92,
-     "buy_p90": 14.88,
-     "intraminute_range_med": 5.56,
-     "fat_depth_med_usd": 230.805
+     "n": 3919,
+     "sell_p90": 11.59,
+     "buy_p90": 13.72,
+     "intraminute_range_med": 5.55,
+     "fat_depth_med_usd": 231.41
     }
    },
-   "open_off_ratio": 1.3602150537634408,
+   "open_off_ratio": 1.4081632653061225,
    "conv_open": {
     "sell": {
-     "band": 12.74,
+     "band": 14.72,
      "episodes": 1,
      "converged": 1,
      "frac": 1.0
     },
     "buy": {
-     "band": 20.24,
+     "band": 19.32,
      "episodes": 0,
      "converged": 0,
      "frac": null
@@ -180,18 +185,23 @@
     [
      "2026-09-03",
      21.97,
-     8.34
+     15.22
+    ],
+    [
+     "2026-09-04",
+     18.64,
+     14.61
     ]
    ],
-   "days_open_gt_2x_off": 2,
+   "days_open_gt_2x_off": 1,
    "econ_open_only": {
     "sell": {
-     "net_bps_maker_norebate": 3.37,
-     "conv_events_per_day": 0.25,
+     "net_bps_maker_norebate": 4.36,
+     "conv_events_per_day": 0.2,
      "usd_per_day": 0.01
     },
     "buy": {
-     "net_bps_maker_norebate": 7.12,
+     "net_bps_maker_norebate": 6.66,
      "conv_events_per_day": 0.0,
      "usd_per_day": 0.0
     }
@@ -204,44 +214,44 @@
   "ANTH": {
    "windows": {
     "OPEN": {
-     "n": 507,
-     "sell_p90": 14.86,
-     "buy_p90": 5.27,
-     "intraminute_range_med": 4.71,
+     "n": 627,
+     "sell_p90": 14.85,
+     "buy_p90": 4.74,
+     "intraminute_range_med": 4.73,
      "fat_depth_med_usd": 62.644999999999996
     },
     "RTH": {
-     "n": 1125,
-     "sell_p90": 13.3,
-     "buy_p90": 13.16,
-     "intraminute_range_med": 4.06,
-     "fat_depth_med_usd": 65.745
+     "n": 1620,
+     "sell_p90": 16.89,
+     "buy_p90": 9.48,
+     "intraminute_range_med": 4.42,
+     "fat_depth_med_usd": 84.14500000000001
     },
     "PRE": {
-     "n": 1299,
-     "sell_p90": 14.83,
-     "buy_p90": 6.31,
-     "intraminute_range_med": 3.69,
-     "fat_depth_med_usd": 70.26
+     "n": 1626,
+     "sell_p90": 14.95,
+     "buy_p90": 5.23,
+     "intraminute_range_med": 3.88,
+     "fat_depth_med_usd": 64.86
     },
     "OFF": {
-     "n": 2880,
-     "sell_p90": 15.78,
-     "buy_p90": 14.25,
-     "intraminute_range_med": 3.7,
-     "fat_depth_med_usd": 29.92
+     "n": 3919,
+     "sell_p90": 15.91,
+     "buy_p90": 11.66,
+     "intraminute_range_med": 3.62,
+     "fat_depth_med_usd": 29.75
     }
    },
-   "open_off_ratio": 0.9416983523447402,
+   "open_off_ratio": 0.933375235700817,
    "conv_open": {
     "sell": {
-     "band": 14.86,
+     "band": 14.85,
      "episodes": 0,
      "converged": 0,
      "frac": null
     },
     "buy": {
-     "band": 5.27,
+     "band": 4.74,
      "episodes": 15,
      "converged": 15,
      "frac": 1.0
@@ -266,19 +276,24 @@
     [
      "2026-09-03",
      17.93,
-     15.41
+     14.89
+    ],
+    [
+     "2026-09-04",
+     14.4,
+     16.44
     ]
    ],
    "days_open_gt_2x_off": 0,
    "econ_open_only": {
     "sell": {
-     "net_bps_maker_norebate": 4.43,
+     "net_bps_maker_norebate": 4.42,
      "conv_events_per_day": 0.0,
      "usd_per_day": 0.0
     },
     "buy": {
-     "net_bps_maker_norebate": -0.37,
-     "conv_events_per_day": 3.75,
+     "net_bps_maker_norebate": -0.63,
+     "conv_events_per_day": 3.0,
      "usd_per_day": 0.0
     }
    },
@@ -297,7 +312,7 @@
  "verdict": "陣亡：時段條件化在這批資料上不成立，不開時鐘",
  "v2": {
   "SNDK": {
-   "open_off_ratio_weekday": 2.19,
+   "open_off_ratio_weekday": 2.15,
    "days": [
     [
      "2026-08-28",
@@ -322,21 +337,26 @@
     [
      "2026-09-03",
      14.897,
-     7.656
+     7.389
+    ],
+    [
+     "2026-09-04",
+     13.174,
+     6.242
     ]
    ],
-   "days_open_gt_2x_off": 4,
+   "days_open_gt_2x_off": 6,
    "conv": {
     "sell": {
-     "band": 2.0,
-     "all_episodes": 194,
-     "open_episodes": 23,
-     "open_converged": 23,
-     "open_frac": 1.0,
-     "open_share": 0.12
+     "band": 2.07,
+     "all_episodes": 208,
+     "open_episodes": 30,
+     "open_converged": 29,
+     "open_frac": 0.97,
+     "open_share": 0.14
     },
     "buy": {
-     "band": 8.01,
+     "band": 8.06,
      "all_episodes": 4,
      "open_episodes": 0,
      "open_converged": 0,
@@ -346,7 +366,7 @@
    }
   },
   "NBIS": {
-   "open_off_ratio_weekday": 1.37,
+   "open_off_ratio_weekday": 1.4,
    "days": [
     [
      "2026-08-31",
@@ -366,31 +386,36 @@
     [
      "2026-09-03",
      21.973,
-     8.344
+     15.22
+    ],
+    [
+     "2026-09-04",
+     18.639,
+     14.614
     ]
    ],
-   "days_open_gt_2x_off": 2,
+   "days_open_gt_2x_off": 1,
    "conv": {
     "sell": {
-     "band": 4.36,
-     "all_episodes": 95,
-     "open_episodes": 22,
-     "open_converged": 22,
+     "band": 13.4,
+     "all_episodes": 7,
+     "open_episodes": 2,
+     "open_converged": 2,
      "open_frac": 1.0,
-     "open_share": 0.23
+     "open_share": 0.29
     },
     "buy": {
-     "band": 14.41,
-     "all_episodes": 1,
-     "open_episodes": 0,
-     "open_converged": 0,
-     "open_frac": null,
-     "open_share": 0.0
+     "band": 13.17,
+     "all_episodes": 7,
+     "open_episodes": 2,
+     "open_converged": 2,
+     "open_frac": 1.0,
+     "open_share": 0.29
     }
    }
   },
   "ANTH": {
-   "open_off_ratio_weekday": 0.99,
+   "open_off_ratio_weekday": 0.94,
    "days": [
     [
      "2026-08-31",
@@ -410,26 +435,31 @@
     [
      "2026-09-03",
      17.934,
-     15.406
+     14.892
+    ],
+    [
+     "2026-09-04",
+     14.4,
+     16.442
     ]
    ],
    "days_open_gt_2x_off": 0,
    "conv": {
     "sell": {
-     "band": 15.19,
-     "all_episodes": 4,
+     "band": 15.89,
+     "all_episodes": 5,
      "open_episodes": 0,
      "open_converged": 0,
      "open_frac": null,
      "open_share": 0.0
     },
     "buy": {
-     "band": 12.11,
-     "all_episodes": 6,
-     "open_episodes": 0,
-     "open_converged": 0,
-     "open_frac": null,
-     "open_share": 0.0
+     "band": 9.52,
+     "all_episodes": 27,
+     "open_episodes": 1,
+     "open_converged": 1,
+     "open_frac": 1.0,
+     "open_share": 0.04
     }
    }
   }
