@@ -71,6 +71,18 @@ def load() -> pd.DataFrame:
     if not files:
         return pd.DataFrame()
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    # B8 (2026-09-05): the scanner no longer EMITS same-venue pairs, but the
+    # historical CSVs are full of them -- Bitget lists XAUT and PAXG, both of
+    # which used to canonicalise to GOLD, so GOLD@bitget-bitget exists in the
+    # data and was sitting in the promotion top three. One venue is not an
+    # arbitrage: there is no second book to hedge on, and config.py refuses
+    # to load such a pair. Dropping them is an INSTRUMENT correction of the
+    # same class as the Bitget depth fix below, not a criterion change.
+    same = df.leg_a == df.leg_b
+    if same.any():
+        print(f"  （丟棄 {int(same.sum()):,} 筆同場館配對——一個交易所不是套利："
+              f"{'，'.join(sorted(df.loc[same, 'pair'].unique()[:3]))} 等）")
+        df = df[~same]
     bad = (((df.leg_a == "bitget") | (df.leg_b == "bitget"))
            & (df.ts < BITGET_DEPTH_FIX_TS))
     if bad.any():
@@ -78,6 +90,48 @@ def load() -> pd.DataFrame:
               f"{'，'.join(sorted(df.loc[bad, 'pair'].unique()[:3]))} 等）")
         df = df[~bad]
     return df.sort_values("ts").reset_index(drop=True)
+
+
+def two_sided(g: pd.DataFrame) -> dict:
+    """Can this pair's premium even REACH both sides? (2026-09-05)
+
+    An identity, not a heuristic. At any single instant
+
+        sell_edge + buy_edge = -(spread_a + spread_b)
+
+    so the two directions are never executable at the same moment; their sum
+    is minus the total spread. A round trip therefore needs the premium to
+    travel across BOTH spreads at different times. If it does not oscillate
+    that far, the pair can be entered and never unwound -- one-sided by
+    arithmetic, whatever the band and depth say.
+
+    Measured on the recording family 2026-09-05: seven of nine pairs fail
+    this, two of them (GOLD_LL, NVDA_LL) with a premium standard deviation
+    under 1 bps against spreads of 1.5-2.9 bps. Those are not "wrong
+    midline" pairs; they have no oscillation to arbitrage at all.
+
+    `margin_bps` = 2 sigma of the premium MINUS the two spreads. Fees are
+    deliberately NOT included: this is an instrument question (can it reach?)
+    and a negative margin cannot be rescued by any fee schedule. Fees come
+    out of whatever margin is left.
+
+    This is REPORTED, not applied. The promotion metric is the one frozen on
+    2026-08-30 and nothing here reorders it.
+    """
+    a_mid = (g.a_bid + g.a_ask) / 2.0
+    b_mid = (g.b_bid + g.b_ask) / 2.0
+    ok = (a_mid > 0) & (b_mid > 0)
+    if ok.sum() < 30:
+        return {"premium_std_bps": None, "spread_sum_bps": None,
+                "margin_bps": None, "reaches_both": None}
+    prem = (a_mid[ok] / b_mid[ok] - 1.0) * 1e4
+    sd = float(prem.std())
+    spread = float((g.a_spread_bps[ok] + g.b_spread_bps[ok]).median())
+    margin = 2.0 * sd - spread
+    return {"premium_std_bps": round(sd, 2),
+            "spread_sum_bps": round(spread, 2),
+            "margin_bps": round(margin, 2),
+            "reaches_both": bool(margin > 0)}
 
 
 def side_metric(g: pd.DataFrame, edge_col: str, depth_cols) -> dict:
@@ -118,9 +172,10 @@ def main() -> int:
         sell = side_metric(g, "sell_edge_bps", ("a_bid_usd", "b_ask_usd"))
         buy = side_metric(g, "buy_edge_bps", ("b_bid_usd", "a_ask_usd"))
         best = max(sell, buy, key=lambda s: s["capturable_usd_per_day"])
+        ts = two_sided(g)
         rows.append({"pair": pair, "n": int(len(g)),
                      "leg_b": g.leg_b.iloc[0], "listed_h": listed_h,
-                     "sell": sell, "buy": buy,
+                     "sell": sell, "buy": buy, **ts,
                      "capturable_usd_per_day": best["capturable_usd_per_day"],
                      "band_bps": best["band_bps"], "depth_usd": best["depth_usd"],
                      "fires_per_day": best["fires_per_day"]})
@@ -143,9 +198,19 @@ def main() -> int:
     print(f"\n  前 15（{'正式名單' if gate_ok else '期中觀察，跨度未達 — 不出名單'}）：")
     show = (eligible if gate_ok else tab[~tab.pair.str.startswith("BTC@")]).head(15)
     for _, r in show.iterrows():
-        print(f"    {r.pair:22s} n={r.n:4d}  band {str(r.band_bps):>7s} bps  "
+        reach = ("  " if r.reaches_both is None
+                 else ("✓ " if r.reaches_both else "✗ "))
+        print(f"    {reach}{r.pair:22s} n={r.n:4d}  band {str(r.band_bps):>7s} bps  "
               f"{r.fires_per_day:6.1f}/天  depth ${str(r.depth_usd):>8s}  "
-              f"≈ ${r.capturable_usd_per_day:>8}/天")
+              f"≈ ${r.capturable_usd_per_day:>8}/天  "
+              f"｜擺盪 2σ−價差 {str(r.margin_bps):>7s} bps")
+    n_one = int((show.reaches_both == False).sum())          # noqa: E712
+    if n_one:
+        print()
+        print(f"  ✗ = 溢價擺盪碰不到另一邊（2σ < 兩腿價差和）——{n_one} 個。")
+        print("    那是恆等式不是門檻：任一瞬間 sell_edge + buy_edge = −價差和，")
+        print("    所以進得去出不來。**這一欄只報告，不參與排序與升格**")
+        print("    （指標 2026-08-30 凍結）。要讓它擋住升格請明講。")
     promote = eligible.head(PROMOTE_N).pair.tolist() if gate_ok else []
     if gate_ok:
         print(f"\n  升格候選（前 {PROMOTE_N}）：{promote or '無'}")
@@ -158,6 +223,14 @@ def main() -> int:
            # cannot tell the difference without this number.
            "min_samples": MIN_SAMPLES,
            "gate_ok": gate_ok, "control_band_bps": ctrl_band,
+           # 2026-09-05: reported alongside the frozen metric, never inside
+           # it. `reaches_both` false = the premium's oscillation cannot
+           # cross both spreads, so the pair is one-sided by arithmetic and a
+           # 7-day recording clock spent on it can only ever measure one leg.
+           "two_sided_note": "reaches_both/margin_bps are DIAGNOSTIC; the "
+                             "ranking and promotion are the 2026-08-30 metric",
+           "one_sided_pairs": sorted(
+               tab.loc[tab.reaches_both == False, "pair"].tolist()),  # noqa: E712
            "promote": promote,
            # `top` = the ranking exactly as the frozen metric orders it, kept
            # whole so the ordering stays auditable. `top_sampled` = the same
