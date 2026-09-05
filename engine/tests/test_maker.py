@@ -602,3 +602,40 @@ def test_an_unknown_status_still_never_retires_an_order():
     o = MakerOrder(venue_key="e", is_buy=True, qty=1.0, px=1.0, sent_ts=0.0)
     o.apply("SOME_STATUS_NOBODY_DOCUMENTED")
     assert not o.is_terminal
+
+
+def test_an_account_cancel_is_not_a_routine_cancel():
+    """Lighter can cancel us for `canceled-margin-not-allowed`; HL for
+    `marginCanceled`. Counting those as "the book moved" means quoting again
+    forever, collecting the same rejection, while the fill rate quietly
+    reads zero."""
+    for s in ("canceled-margin-not-allowed", "marginCanceled",
+              "canceled-invalid-balance", "canceled-position-not-allowed",
+              "reduceOnlyCanceled", "liquidatedCanceled", "delistedCanceled"):
+        assert mk.is_account_cancel(s), s
+    for s in ("canceled-post-only", "canceled-expired", "canceled",
+              "canceled-too-much-slippage", "filled"):
+        assert not mk.is_account_cancel(s), s
+
+
+def test_an_account_reject_pauses_the_venue():
+    eng = make_engine()
+
+    def hook(eng, m, t, p, o):
+        m.on_cancel = lambda v: setattr(v, "ex_status",
+                                        "canceled-margin-not-allowed")
+    p, order = _drive(eng, hook)
+    assert eng.maker_account_rejects == 1
+    assert eng.maker_cancels == 0, "counted as a routine cancel"
+    assert eng._venue_limited(eng.entropy), "the venue was not paused"
+
+
+def test_an_account_reject_does_not_reset_the_error_counter():
+    """A problem must not look like a clean run."""
+    eng = make_engine()
+    eng.consec_errors = 2
+
+    def hook(eng, m, t, p, o):
+        m.on_cancel = lambda v: setattr(v, "ex_status", "marginCanceled")
+    _drive(eng, hook)
+    assert eng.consec_errors == 2, "an account rejection cleared the errors"

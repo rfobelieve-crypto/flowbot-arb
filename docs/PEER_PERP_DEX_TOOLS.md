@@ -20,8 +20,14 @@
 | `exchanges/base.py` | 13–33（重試裝飾器） |
 | 八支 `hedge_mode_*` | 結構化關鍵字比對（部分成交／對帳／撤單猜測） |
 
-**仍然沒讀**：`trading_bot.py`（579 行，非對沖的主策略）、`exchanges/` 其餘
-九個連接器、`hedge_mode_{bp,apex,grvt,nado,standx}` 的主體。
+**第二輪（2026-09-05 晚）補讀完**：`trading_bot.py`、`helpers/` 全部四支、
+`exchanges/base.py` 全部、`exchanges/edgex.py` 的下單路徑，以及對十一個連接器
+與八支 `hedge_mode_*` 的全庫模式掃描（狀態對映、post-only、取整、重試、
+風控關鍵字、註解裡的已知坑）。
+
+`hedge_mode_{bp,apex,grvt,nado,standx}` 經比對是**同一份模板的逐venue複製**
+（同樣的例外訊息出現在相差 ±2 的行號上），沒有獨有的守衛——所以第二節那個
+「只有 grvt_v2 有差額檢查與自適應中樞」的結論成立。
 
 ---
 
@@ -213,6 +219,38 @@ if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
 **`is_fresh()` 刻意不動**——錄價器用它數 `samples`，而錄製家族正在閘門中，
 改變「什麼算一筆樣本」等於在量測進行中換掉儀器。六個新測試釘住這件事，
 包括一個專門斷言 `is_fresh` 對交叉簿口仍然回 True。
+
+## 六之三、全部讀完之後，帶回來並已經修掉的四個缺陷
+
+| # | 我們的缺陷 | 從哪裡看到的 | 狀態 |
+|---|---|---|---|
+| 1 | **交叉簿口沒擋** —— `is_fresh()` 只看新鮮度，`plan_arb`／`_hedge`／`_flatten_step` 完全沒查 | `trading_bot.py:458` 每次價格決策前都擋 `best_bid >= best_ask` | ✅ 新增 `is_crossed()` / `tradeable()`，六條送單路徑全改 |
+| 2 | **ws 參數過緊** —— `ping_interval=15, ping_timeout=15` 一次慢 pong 就斷；`max_queue` 用函式庫預設 32 | `helpers/lighter_ws.py` 用 50/20，註解說新版伺服器要求客戶端定期 ping | ✅ 改 50/20 + `max_queue=1024` |
+| 3 | **訂單狀態比對大小寫敏感** —— `FILLED`/`CANCELED` 回 `False`，訂單永遠卡在 `unknown` 擋住後續所有報價 | `extended.py:654` 同時處理兩種拼法、`grvt.py:172` 有 per-venue 狀態表 | ✅ 正規化比對，並把 `PARTIALLY_FILLED`/`NEW` 歸為 open |
+| 4 | **掛單路徑不分辨帳戶級撤單** —— 保證金／餘額／持倉限制被當成「行情動了」計入普通撤單 | `base.py` 的 `OrderInfo.cancel_reason` 欄位（我們沒有對應物） | ✅ `is_account_cancel()`，命中就暫停該場館並喊 CRITICAL |
+
+第 2 條有數字支撐：錄製家族全部 log 共 161 次 ws 斷線（Lighter 系 118／HL 系
+43），其中 142 次是「no close frame received」、10 次是我們自己送的
+keepalive 1011。`max_queue=32` 很可能就是那 142 的成因——每一幀都喚醒策略
+迴圈，策略走訪兩邊簿口的期間讀取端沒有排空，32 幀塞滿就 TCP 回壓、伺服器
+掛斷。
+
+第 3 條的失敗模式最陰險：它不會下錯單，它會**讓引擎安靜地停住**。
+
+## 六之四、看起來像缺陷但其實是不同目標的兩處
+
+1. **他們的掛單價貼著對面**（`edgex.py:283-289`：買單掛在 `best_ask − tick`）。
+   我們是掛在自己這一側的最優價再改善一檔，且**永遠不超過門檻允許的價格**。
+   他們優化成交率（README 全篇在講返佣與積分），我們優化邊際——**邊際就是
+   我們的全部目的**。不是缺陷，是不同的目標函數。
+2. **他們對 post-only 被拒重試 15 次**，每次重抓 BBO 重新定價。我們把它當成
+   一次錯過，等下一次簿口更新重新規劃。我們那一圈會重跑全部風控閘門，
+   比較慢但比較安全。刻意的差異。
+
+另外一處**我們比較好而讀他們才注意到**：數量取整。他們每一腿各自
+quantize 到該場館的 size increment（`paradex.py:336`、`extended.py:345`），
+**兩腿的格線不同時會每筆留下固定的差額**。我們用兩所中較粗的那個格線
+（`_step = 10 ** -min(size_decimals)`）並且**無條件捨去**，兩腿數量必然一致。
 
 ## 七、一句話
 

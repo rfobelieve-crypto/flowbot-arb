@@ -70,6 +70,34 @@ OPEN_STATUSES = frozenset({"open", "resting", "in-progress", "pending",
                            "new", "partially_filled", "partially-filled"})
 
 
+# A cancel reason is not just a label. Lighter enumerates ten of them and
+# Hyperliquid nine, and they split into two groups that deserve completely
+# different reactions:
+#
+#   market  — the book moved, we would have crossed, the slice was too big.
+#             Routine. Quote again.
+#   account — margin, balance, position-not-allowed, reduce-only-would-have-
+#             increased, liquidated, delisted. **The venue is telling us
+#             something about the ACCOUNT**, and quoting again just collects
+#             the same rejection forever while the fill rate quietly reads
+#             zero.
+#
+# The taker path already separates these (`"margin" in status -> pause the
+# venue`, engine.py:724). The maker path did not: every terminal status was
+# counted as one routine cancel. Found 2026-09-05 while reading
+# perp-dex-tools, whose OrderInfo carries a `cancel_reason` field we had no
+# equivalent for.
+ACCOUNT_CANCEL_MARKERS = ("margin", "balance", "liquidat", "delisted",
+                          "position-not-allowed", "reduce-only",
+                          "reduceonly", "insufficient")
+
+
+def is_account_cancel(status: str) -> bool:
+    """True when the venue cancelled us for a reason about the ACCOUNT."""
+    s = _norm(status)
+    return any(m in s for m in ACCOUNT_CANCEL_MARKERS)
+
+
 def _norm(status: str) -> str:
     return (status or "").strip().lower()
 

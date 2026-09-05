@@ -151,6 +151,7 @@ class Engine:
         self.maker_cancels = 0      # quotes cancelled unfilled
         self.maker_rejects = 0      # post-only rejections (book moved)
         self.maker_unknown = 0      # cancels that blew their budget
+        self.maker_account_rejects = 0   # venue said no for an ACCOUNT reason
 
     # ------------------------------------------------------------- utilities
 
@@ -1292,6 +1293,23 @@ class Engine:
                 outcome = "post-only-reject"   # never reached the book
             elif order.status == "rejected":
                 outcome = "send-failed"
+            elif mk.is_account_cancel(order.status):
+                # Not "the book moved" -- the venue is telling us something
+                # about the account. Quoting again collects the same
+                # rejection forever while the fill rate quietly reads zero.
+                # Same reaction the taker path already has for a margin
+                # rejection: pause this venue and say so loudly.
+                outcome = "account-reject"
+                self.maker_account_rejects += 1
+                log.critical(
+                    "[%s] MAKER ORDER CANCELLED BY THE VENUE FOR AN ACCOUNT "
+                    "REASON: %r — this is not the market moving. Pausing the "
+                    "venue for %.0fs. Check collateral, position limits and "
+                    "reduce-only state. / 交易所因帐户原因撤掉我们的挂单"
+                    "（保证金／余额／持仓限制），不是行情问题",
+                    maker_v.name, order.status, self.cfg.rate_limit_pause_sec)
+                self._mark_limited(maker_v)
+                self._reconcile_evt.set()
             else:
                 outcome = "cancelled"
             self._maker_open.pop(maker_v.key, None)
@@ -1306,6 +1324,8 @@ class Engine:
             self.maker_rested += 1
         if (outcome in ("filled", "cancelled", "post-only-reject")
                 and not order.stats.get("hedge_error")):
+            # note: "account-reject" is deliberately NOT here -- it is a
+            # problem, and a problem must not reset the error counter.
             # A quote that reached a clean end -- including one that simply
             # never filled -- is evidence the execution path works. A send
             # that merely left the building is not.
@@ -2136,6 +2156,9 @@ class Engine:
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
                     rec += f" | *** UNRESOLVED CANCELS x{self.maker_unknown} ***"
+                if self.maker_account_rejects:
+                    rec += (f" | *** ACCOUNT REJECTS "
+                            f"x{self.maker_account_rejects} ***")
             if self.paused_by_operator:
                 rec += f" | PAUSED({self.pause_source})"
             if self.flatten_request:
