@@ -29,11 +29,15 @@ except ImportError:
 
 from .book import OrderBook
 from .config import VenueConf
-from .feeds import LighterBookFeed
+from .feeds import WS_KWARGS, LighterBookFeed
 
 log = logging.getLogger("lighter")
 
-OPEN_STATUSES = {"in-progress", "pending", "open"}
+# Lighter's own enum is lowercase (models/order.py, verified 2026-09-04),
+# but the comparison is normalised anyway: an unrecognised status here makes
+# an order look TERMINAL, which is the optimistic direction and the one that
+# loses a hedge. See maker.TERMINAL_STATUSES for the same reasoning.
+OPEN_STATUSES = {"in-progress", "pending", "open", "new", "partially_filled"}
 AUTH_REFRESH_SEC = 8 * 60
 REST_TIMEOUT = 10.0
 
@@ -92,7 +96,7 @@ class AccountOrdersFeed:
     def _handle_orders(self, msg: dict) -> None:
         for lst in (msg.get("orders") or {}).values():
             for o in lst or []:
-                status = str(o.get("status", ""))
+                status = str(o.get("status", "")).strip().lower()
                 try:
                     coi = int(o.get("client_order_index"))
                 except (TypeError, ValueError):
@@ -117,8 +121,10 @@ class AccountOrdersFeed:
                 if err is not None:
                     raise RuntimeError(f"auth token: {err}")
                 connected_at = time.time()
-                async with ws_connect(self.ws_url, max_size=2**23, open_timeout=10,
-                                      ping_interval=15, ping_timeout=15) as ws:
+                # Same settings as the book feeds (feeds.WS_KWARGS): this is
+                # the SETTLEMENT channel, so a connection dropped by our own
+                # aggressive keepalive is a fill we learn about late.
+                async with ws_connect(self.ws_url, **WS_KWARGS) as ws:
                     async for raw in ws:
                         backoff = 1.0
                         msg = json.loads(raw)

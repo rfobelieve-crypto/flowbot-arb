@@ -28,6 +28,32 @@ from .book import OrderBook
 
 log = logging.getLogger("feeds")
 
+# WebSocket connection settings, revised 2026-09-05 from evidence + the
+# settings perp-dex-tools uses against the same venue (helpers/lighter_ws.py,
+# whose comment says the newer Lighter server REQUIRES regular client pings).
+#
+# What the logs said: 161 ws errors across the recording family, of which
+#   142  "no close frame received or sent"      <- server/network dropped us
+#    10  "keepalive ping timeout"               <- WE closed it, code 1011
+# Lighter dropped 118 times to HL's 43.
+#
+# ping_interval 15 -> 50, ping_timeout 15 -> 20. At 15/15 a SINGLE slow pong
+# kills the connection; one such drop on 2026-09-05 took the shadow engine's
+# book stale and (under the then-current rule) halted it for two hours.
+#
+# max_queue 32 (the library default) -> 1024. This is the likely cause of the
+# 142: every inbound frame calls notify(), which wakes the strategy loop, and
+# the strategy walks both books. While it works the reader is not draining;
+# at 32 frames the queue fills, TCP backs up, and the server hangs up -- which
+# is exactly "no close frame received". A deeper queue absorbs the burst.
+WS_KWARGS = {
+    "max_size": 2 ** 23,
+    "open_timeout": 10,
+    "ping_interval": 50,
+    "ping_timeout": 20,
+    "max_queue": 1024,
+}
+
 
 def _chan_id(channel: str) -> Optional[int]:
     """'order_book:32' / 'order_book/32' -> 32."""
@@ -94,8 +120,7 @@ class LighterBookFeed:
         backoff = 1.0
         while not stop.is_set():
             try:
-                async with ws_connect(self.ws_url, max_size=2**23, open_timeout=10,
-                                      ping_interval=15, ping_timeout=15) as ws:
+                async with ws_connect(self.ws_url, **WS_KWARGS) as ws:
                     log.info("[%s] connected (%s)", self.name, self.ws_url)
                     self.book.clear()
                     self._nonce = None
@@ -171,8 +196,7 @@ class HLBookFeed:
         while not stop.is_set():
             ptask = None
             try:
-                async with ws_connect(self.ws_url, max_size=2**23, open_timeout=10,
-                                      ping_interval=15, ping_timeout=15) as ws:
+                async with ws_connect(self.ws_url, **WS_KWARGS) as ws:
                     log.info("[%s] connected (official ws, %s)", self.name, self.coin)
                     self.book.clear()
                     self._snapped = False

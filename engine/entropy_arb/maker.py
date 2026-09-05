@@ -50,13 +50,28 @@ UNKNOWN = "unknown"        # cancel budget blew: treat as possibly filled
 # 2026-09-04) and every cancel reason there is prefixed "canceled-";
 # Hyperliquid's orderStatus says "open" while resting and one of these once
 # it is not.
-TERMINAL_STATUSES = frozenset({
+#
+# Compared CASE-INSENSITIVELY (2026-09-05). Today HL sends lower/camelCase
+# and Lighter sends lowercase, so an exact match happens to work -- but the
+# failure mode if that ever changes is the worst one available here: an
+# unrecognised status is (correctly) not terminal, so the order sits in
+# `unknown` forever, and an order in `unknown` blocks every future quote.
+# A venue changing "filled" to "FILLED" would stop the engine dead, quietly.
+# perp-dex-tools carries per-venue status maps for exactly this reason and
+# handles both CANCELED and CANCELLED spellings (exchanges/extended.py:654,
+# exchanges/grvt.py:172-174).
+TERMINAL_STATUSES = frozenset(x.lower() for x in {
     "filled", "canceled", "cancelled", "rejected", "expired",
     "marginCanceled", "vaultWithdrawalCanceled", "openInterestCapCanceled",
     "selfTradeCanceled", "reduceOnlyCanceled", "siblingFilledCanceled",
     "delistedCanceled", "liquidatedCanceled", "scheduledCancel",
 })
-OPEN_STATUSES = frozenset({"open", "resting", "in-progress", "pending"})
+OPEN_STATUSES = frozenset({"open", "resting", "in-progress", "pending",
+                           "new", "partially_filled", "partially-filled"})
+
+
+def _norm(status: str) -> str:
+    return (status or "").strip().lower()
 
 
 def is_terminal_status(status: str) -> bool:
@@ -64,9 +79,10 @@ def is_terminal_status(status: str) -> bool:
 
     An unrecognised string is NOT terminal. Retiring an order on a status we
     do not understand is the optimistic assumption this file exists to
-    forbid.
+    forbid -- but see the note above TERMINAL_STATUSES for why the matching
+    is case-insensitive rather than exact.
     """
-    s = (status or "").strip()
+    s = _norm(status)
     if not s or s in OPEN_STATUSES:
         return False
     return (s in TERMINAL_STATUSES or s.startswith("canceled")
@@ -176,7 +192,7 @@ class MakerOrder:
             # cancelling and from unknown alike: an order we had lost track
             # of is resolved the moment the exchange says what happened.
             self.state = DONE
-        elif status in OPEN_STATUSES and self.state == NEW:
+        elif _norm(status) in OPEN_STATUSES and self.state == NEW:
             self.state = RESTING
         return gained
 

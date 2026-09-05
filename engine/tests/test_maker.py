@@ -573,3 +573,32 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name:52s} OK")
+
+
+def test_status_matching_is_case_insensitive():
+    """Today HL sends lower/camelCase and Lighter lowercase, so exact
+    matching happens to work. The failure mode if that ever changes is the
+    worst one here: an unrecognised status is (correctly) not terminal, the
+    order sits in `unknown` forever, and an order in `unknown` blocks every
+    future quote. A venue renaming "filled" to "FILLED" would stop the
+    engine dead, quietly."""
+    for s in ("FILLED", "Filled", "CANCELED", "CANCELLED", "REJECTED",
+              "Canceled-Post-Only"):
+        assert mk.is_terminal_status(s), s
+    for s in ("OPEN", "New", "PARTIALLY_FILLED", "Pending"):
+        assert not mk.is_terminal_status(s), s
+
+
+def test_a_partial_fill_status_keeps_the_order_resting():
+    """PARTIALLY_FILLED means still on the book with some of it done --
+    terminal only to a matcher that has never seen the word."""
+    o = MakerOrder(venue_key="e", is_buy=True, qty=1.0, px=1.0, sent_ts=0.0)
+    o.apply("PARTIALLY_FILLED", filled_base=0.4)
+    assert not o.is_terminal
+    approx(o.unhedged, 0.4)
+
+
+def test_an_unknown_status_still_never_retires_an_order():
+    o = MakerOrder(venue_key="e", is_buy=True, qty=1.0, px=1.0, sent_ts=0.0)
+    o.apply("SOME_STATUS_NOBODY_DOCUMENTED")
+    assert not o.is_terminal

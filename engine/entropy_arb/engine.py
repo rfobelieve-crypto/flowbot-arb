@@ -1300,7 +1300,7 @@ class Engine:
             self._maker_open.pop(maker_v.key, None)
         else:
             outcome = "unresolved"
-        rested = (any(st in mk.OPEN_STATUSES for st in order.seen)
+        rested = (any(mk._norm(st) in mk.OPEN_STATUSES for st in order.seen)
                   or filled > 0)
         if rested:
             self.maker_rested += 1
