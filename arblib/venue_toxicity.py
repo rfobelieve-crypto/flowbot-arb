@@ -22,8 +22,10 @@ T=60，成交 92.9%，**markout_60 = −3.1 bps，CI [−3.4, −2.8]**——守
   未成交    不給報酬。只報 m_h = s×(mid(t+h)−mid(t))/mid(t) 的成交／未成交對照（選擇效應）。
   資料      本 repo 的 engine/logs/<pair>/minutes.csv（`entropy_*` 與 `hedge_*` 兩條腿各跑一次）。
             **每分鐘一個快照，看不到分鐘內成交與佇列位置**——跟基準是同一種解析度，可比。
-  判準      場館「可站被動側」需同時：markout_60 的 CI 下緣 > −1 bps（不比零費場館的
-            半價差差）∧ 成交後漂移 CI 含零或為正 ∧ 兩半同號。否則「有人守」。
+  判準      場館「可站被動側」需同時：**點差調整後** markout_60（markout ＋ 該場館半價差
+            中位）的 CI 下緣 > 0 ∧ 成交後漂移 CI 含零或為正 ∧ 兩半同號。否則「有人守」。
+            （小場館點差寬，未調整的 markout 會把半價差算成逆選擇——Binance BTC 半價差
+            只有 0.5 bps 所以那邊可以直接讀，這裡不行。）
 
 Run: python arblib/venue_toxicity.py [--pair NBIS] [--leg entropy|hedge|both] [--T 60] [--step 3]
 Out: results/venue_toxicity_<pair>.json
@@ -98,7 +100,7 @@ def dblock(v, days, B=2000, seed=3):
     return float(np.percentile(out, 2.5)), float(np.percentile(out, 97.5))
 
 
-def report(pair, leg, res, T):
+def report(pair, leg, res, T, half_spread_bps=None):
     df = pd.concat([res[1]["df"], res[-1]["df"]], ignore_index=True)
     f = df[df.filled]; u = df[~df.filled]
     print(f"\n  [{pair} · {leg}] T={T}m  事件 {len(df)}  成交率 {df.filled.mean()*100:.1f}%  "
@@ -116,11 +118,20 @@ def report(pair, leg, res, T):
               f" [{dlo:+7.2f},{dhi:+7.2f}]{st['m_filled']:>+9.2f}/{(st['m_unfilled'] or 0):>+7.2f}")
     half = len(f) // 2
     h1, h2 = f["mo60"].iloc[:half].mean(), f["mo60"].iloc[half:].mean()
-    c1 = stats[60]["ci"][0] > -1.0; c2 = stats[60]["drift_ci"][1] >= 0; c3 = np.sign(h1) == np.sign(h2)
+    # 小場館點差寬，「被穿過幅度」裡有一大塊只是半價差本身。真正該比的是
+    # markout 相對於「掛單當下能收到的半價差」：spread-adjusted = markout + 半價差中位。
+    # 為正＝收到的價差蓋得過逆選擇（莊家）；為負＝蓋不過（肥羊）。Binance BTC 半價差
+    # 約 0.5 bps，所以那邊 −3.1 幾乎全是逆選擇；這裡要先扣掉自己的點差再讀。
+    hs_med = float(half_spread_bps.median()) if half_spread_bps is not None else float("nan")
+    adj = stats[60]["markout"] + hs_med
+    adj_lo = stats[60]["ci"][0] + hs_med
+    c1 = adj_lo > 0; c2 = stats[60]["drift_ci"][1] >= 0; c3 = np.sign(h1) == np.sign(h2)
     verdict = "可站被動側" if (c1 and c2 and c3) else "有人守"
-    print(f"    兩半 markout60 {h1:+.2f}/{h2:+.2f}  (1) CI下緣>−1: {'過' if c1 else '不過'}  (2) 漂移不為負: {'過' if c2 else '不過'}"
-          f"  (3) 兩半同號: {'過' if c3 else '不過'}  ==> {verdict}   [Binance BTC 基準: −3.1 bps]")
-    return {"fill": float(df.filled.mean()), "stats": stats, "halves": [float(h1), float(h2)], "verdict": verdict}
+    print(f"    半價差中位 {hs_med:.2f} bps → 點差調整後 markout60 {adj:+.2f} (CI下緣 {adj_lo:+.2f})")
+    print(f"    兩半 markout60 {h1:+.2f}/{h2:+.2f}  (1) 調整後CI下緣>0: {'過' if c1 else '不過'}  (2) 漂移不為負: {'過' if c2 else '不過'}"
+          f"  (3) 兩半同號: {'過' if c3 else '不過'}  ==> {verdict}   [Binance BTC 基準: 半價差 0.5, markout −3.1]")
+    return {"fill": float(df.filled.mean()), "stats": stats, "half_spread_med": hs_med, "adjusted60": float(adj),
+            "halves": [float(h1), float(h2)], "verdict": verdict}
 
 
 def main():
@@ -134,7 +145,9 @@ def main():
     print("=" * 96)
     out = {}
     for leg in (("entropy", "hedge") if a.leg == "both" else (a.leg,)):
-        out[leg] = report(a.pair, leg, run_leg(d, leg, a.T, a.step), a.T)
+        b = d[f"{leg}_bid"].astype(float); k = d[f"{leg}_ask"].astype(float)
+        hs = ((k - b) / (k + b)) * 1e4          # half-spread in bps of mid
+        out[leg] = report(a.pair, leg, run_leg(d, leg, a.T, a.step), a.T, hs.dropna())
     (ROOT / "results").mkdir(exist_ok=True)
     (ROOT / "results" / f"venue_toxicity_{a.pair}.json").write_text(
         json.dumps({"pair": a.pair, "T": a.T, "step": a.step, "legs": out}, ensure_ascii=False, indent=1, default=float),
