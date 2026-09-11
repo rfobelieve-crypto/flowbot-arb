@@ -23,3 +23,5 @@ venv/
 # 我們的」這個問題永遠答不清楚——而那正是 PEER_INFRA 的紀律要保住的東西。
 entropy-arb-main/
 perp-dex-tools-main/
+results/.record_universe.lock
+engine/logs/universe/

@@ -36,6 +36,10 @@ $Members = [ordered]@{
   'GOLD_LL' = @('--symbol XAU ',  'run_recorder_GOLD_LL.bat')
   'NVDA_LL' = @('--symbol NVDA ', 'run_recorder_NVDA_LL.bat')
   'scanner' = @('tools\scanner.py', 'run_scanner.bat')
+  # 2026-09-11 §1.25：宇宙級錄製器。它不是 main.py,所以比對式要另一條
+  # （見下面的 -or）。少了這一條它死掉就沒人拉起來,而它錄的是
+  # **不可回填**的分鐘資料。
+  'universe' = @('toolsecord_universe.py', 'run_recorder_universe.bat')
 }
 
 $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -44,14 +48,14 @@ $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
 $dead = @()
 foreach ($name in $Members.Keys) {
   $sig, $bat = $Members[$name]
-  $alive = @($procs | Where-Object { $_ -like "*main.py --record-only*$sig*" -or ($name -eq 'scanner' -and $_ -like "*$sig*") }).Count
+  $alive = @($procs | Where-Object { $_ -like "*main.py --record-only*$sig*" -or ($name -in 'scanner','universe' -and $_ -like "*$sig*") }).Count
   if ($alive -ge 1) { continue }
   $dead += $name
   if (-not $DryRun) {
     Start-Process -FilePath (Join-Path $Root $bat) -WorkingDirectory $Root -WindowStyle Minimized
   }
 }
-$line = if ($dead.Count -eq 0) { "$stamp UTC  all 10 alive" }
+$line = if ($dead.Count -eq 0) { "$stamp UTC  all $($Members.Count) alive" }
         elseif ($DryRun)      { "$stamp UTC  DRY-RUN would relaunch: $($dead -join ',')" }
         else                  { "$stamp UTC  RELAUNCHED: $($dead -join ',')" }
 Add-Content -Path $Log -Value $line -Encoding UTF8

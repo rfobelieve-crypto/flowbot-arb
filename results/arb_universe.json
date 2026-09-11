@@ -1,0 +1,2797 @@
+{
+  "asof": "2026-09-11 18:07:46",
+  "rule": "每一個在 >= 2 個可接 WS 場館上都有的 canonical ticker；無排名、無門檻、無績效相關的排除",
+  "ws_venues": [
+    "HL",
+    "lighter",
+    "lighter-rh"
+  ],
+  "venue_counts": {
+    "HL": 178,
+    "lighter": 216,
+    "lighter-rh": 57
+  },
+  "errors": {},
+  "n_tickers": 126,
+  "n_pairs": 150,
+  "subscriptions": {
+    "HL": 95,
+    "lighter": 126,
+    "lighter-rh": 43
+  },
+  "tickers": {
+    "BTC": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "ETH": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "DYDX": [
+      "HL",
+      "lighter"
+    ],
+    "SOL": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "AVAX": [
+      "HL",
+      "lighter"
+    ],
+    "BNB": [
+      "HL",
+      "lighter"
+    ],
+    "OP": [
+      "HL",
+      "lighter"
+    ],
+    "LTC": [
+      "HL",
+      "lighter"
+    ],
+    "ARB": [
+      "HL",
+      "lighter"
+    ],
+    "DOGE": [
+      "HL",
+      "lighter"
+    ],
+    "SUI": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "CRV": [
+      "HL",
+      "lighter"
+    ],
+    "LDO": [
+      "HL",
+      "lighter"
+    ],
+    "LINK": [
+      "HL",
+      "lighter"
+    ],
+    "GMX": [
+      "HL",
+      "lighter"
+    ],
+    "XRP": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "BCH": [
+      "HL",
+      "lighter"
+    ],
+    "APT": [
+      "HL",
+      "lighter"
+    ],
+    "AAVE": [
+      "HL",
+      "lighter"
+    ],
+    "WLD": [
+      "HL",
+      "lighter"
+    ],
+    "TRX": [
+      "HL",
+      "lighter"
+    ],
+    "UNI": [
+      "HL",
+      "lighter"
+    ],
+    "SEI": [
+      "HL",
+      "lighter"
+    ],
+    "ZRO": [
+      "HL",
+      "lighter"
+    ],
+    "DOT": [
+      "HL",
+      "lighter"
+    ],
+    "TIA": [
+      "HL",
+      "lighter"
+    ],
+    "ADA": [
+      "HL",
+      "lighter"
+    ],
+    "PENDLE": [
+      "HL",
+      "lighter"
+    ],
+    "NEAR": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "FIL": [
+      "HL",
+      "lighter"
+    ],
+    "PYTH": [
+      "HL",
+      "lighter"
+    ],
+    "JUP": [
+      "HL",
+      "lighter"
+    ],
+    "JTO": [
+      "HL",
+      "lighter"
+    ],
+    "WIF": [
+      "HL",
+      "lighter"
+    ],
+    "ONDO": [
+      "HL",
+      "lighter"
+    ],
+    "STRK": [
+      "HL",
+      "lighter"
+    ],
+    "TAO": [
+      "HL",
+      "lighter"
+    ],
+    "ETHFI": [
+      "HL",
+      "lighter"
+    ],
+    "ENA": [
+      "HL",
+      "lighter"
+    ],
+    "MNT": [
+      "HL",
+      "lighter"
+    ],
+    "HBAR": [
+      "HL",
+      "lighter"
+    ],
+    "POPCAT": [
+      "HL",
+      "lighter"
+    ],
+    "EIGEN": [
+      "HL",
+      "lighter"
+    ],
+    "ZK": [
+      "HL",
+      "lighter"
+    ],
+    "POL": [
+      "HL",
+      "lighter"
+    ],
+    "GRASS": [
+      "HL",
+      "lighter"
+    ],
+    "XLM": [
+      "HL",
+      "lighter"
+    ],
+    "HYPE": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "VIRTUAL": [
+      "HL",
+      "lighter"
+    ],
+    "PENGU": [
+      "HL",
+      "lighter"
+    ],
+    "FARTCOIN": [
+      "HL",
+      "lighter"
+    ],
+    "BIO": [
+      "HL",
+      "lighter"
+    ],
+    "SPX": [
+      "HL",
+      "lighter"
+    ],
+    "S": [
+      "HL",
+      "lighter"
+    ],
+    "MORPHO": [
+      "HL",
+      "lighter"
+    ],
+    "TRUMP": [
+      "HL",
+      "lighter"
+    ],
+    "VVV": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "BERA": [
+      "HL",
+      "lighter"
+    ],
+    "KAITO": [
+      "HL",
+      "lighter"
+    ],
+    "PAXG": [
+      "HL",
+      "lighter"
+    ],
+    "ZORA": [
+      "HL",
+      "lighter"
+    ],
+    "RESOLV": [
+      "HL",
+      "lighter"
+    ],
+    "SYRUP": [
+      "HL",
+      "lighter"
+    ],
+    "PUMP": [
+      "HL",
+      "lighter"
+    ],
+    "PROVE": [
+      "HL",
+      "lighter"
+    ],
+    "XPL": [
+      "HL",
+      "lighter"
+    ],
+    "WLFI": [
+      "HL",
+      "lighter"
+    ],
+    "LINEA": [
+      "HL",
+      "lighter"
+    ],
+    "SKY": [
+      "HL",
+      "lighter"
+    ],
+    "ASTER": [
+      "HL",
+      "lighter"
+    ],
+    "AVNT": [
+      "HL",
+      "lighter"
+    ],
+    "STBL": [
+      "HL",
+      "lighter"
+    ],
+    "0G": [
+      "HL",
+      "lighter"
+    ],
+    "APEX": [
+      "HL",
+      "lighter"
+    ],
+    "2Z": [
+      "HL",
+      "lighter"
+    ],
+    "ZEC": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "MON": [
+      "HL",
+      "lighter"
+    ],
+    "MET": [
+      "HL",
+      "lighter"
+    ],
+    "MEGA": [
+      "HL",
+      "lighter"
+    ],
+    "CC": [
+      "HL",
+      "lighter"
+    ],
+    "ICP": [
+      "HL",
+      "lighter"
+    ],
+    "AERO": [
+      "HL",
+      "lighter"
+    ],
+    "STABLE": [
+      "HL",
+      "lighter"
+    ],
+    "FOGO": [
+      "HL",
+      "lighter"
+    ],
+    "LIT": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "XMR": [
+      "HL",
+      "lighter"
+    ],
+    "AXS": [
+      "HL",
+      "lighter"
+    ],
+    "DASH": [
+      "HL",
+      "lighter"
+    ],
+    "SKR": [
+      "HL",
+      "lighter"
+    ],
+    "AZTEC": [
+      "HL",
+      "lighter"
+    ],
+    "CHIP": [
+      "HL",
+      "lighter"
+    ],
+    "GRAM": [
+      "HL",
+      "lighter"
+    ],
+    "CASHCAT": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "PONS": [
+      "HL",
+      "lighter",
+      "lighter-rh"
+    ],
+    "USELESS": [
+      "HL",
+      "lighter"
+    ],
+    "AMD": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "NVDA": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "OPENAI": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SHEIN": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SPY": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "QQQ": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "INTC": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "PLTR": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "BE": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "COIN": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "MU": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "TSLA": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "CRWV": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "ORCL": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "TSM": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "BABA": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "META": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "MSFT": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "AAPL": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SOXL": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "AI": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SPCX": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "CRCL": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "ANTHROPIC": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "XAG": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SKHY": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "SNDK": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "ANSEM": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "GOOGL": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "XAU": [
+      "lighter",
+      "lighter-rh"
+    ],
+    "AMZN": [
+      "lighter",
+      "lighter-rh"
+    ]
+  },
+  "pairs": [
+    {
+      "ticker": "0G",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "2Z",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AAPL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "AAVE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ADA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AERO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AI",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "AMD",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "AMZN",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ANSEM",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ANTHROPIC",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "APEX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "APT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ARB",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ASTER",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AVAX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AVNT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AXS",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "AZTEC",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BABA",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "BCH",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BE",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "BERA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BIO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BNB",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BTC",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "BTC",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "BTC",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "CASHCAT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "CASHCAT",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "CASHCAT",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "CC",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "CHIP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "COIN",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "CRCL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "CRV",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "CRWV",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "DASH",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "DOGE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "DOT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "DYDX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "EIGEN",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ENA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ETH",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ETH",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ETH",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ETHFI",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "FARTCOIN",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "FIL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "FOGO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "GMX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "GOOGL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "GRAM",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "GRASS",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "HBAR",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "HYPE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "HYPE",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "HYPE",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ICP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "INTC",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "JTO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "JUP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "KAITO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "LDO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "LINEA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "LINK",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "LIT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "LIT",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "LIT",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "LTC",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "MEGA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "MET",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "META",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "MNT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "MON",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "MORPHO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "MSFT",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "MU",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "NEAR",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "NEAR",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "NEAR",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "NVDA",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ONDO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "OP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "OPENAI",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ORCL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "PAXG",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PENDLE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PENGU",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PLTR",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "POL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PONS",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PONS",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "PONS",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "POPCAT",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PROVE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PUMP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "PYTH",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "QQQ",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "RESOLV",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "S",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SEI",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SHEIN",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SKHY",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SKR",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SKY",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SNDK",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SOL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SOL",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SOL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SOXL",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SPCX",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SPX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SPY",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "STABLE",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "STBL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "STRK",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SUI",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "SUI",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SUI",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "SYRUP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "TAO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "TIA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "TRUMP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "TRX",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "TSLA",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "TSM",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "UNI",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "USELESS",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "VIRTUAL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "VVV",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "VVV",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "VVV",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "WIF",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "WLD",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "WLFI",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "XAG",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "XAU",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "XLM",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "XMR",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "XPL",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "XRP",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "XRP",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "XRP",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ZEC",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ZEC",
+      "leg_a": "HL",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ZEC",
+      "leg_a": "lighter",
+      "leg_b": "lighter-rh"
+    },
+    {
+      "ticker": "ZK",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ZORA",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    },
+    {
+      "ticker": "ZRO",
+      "leg_a": "HL",
+      "leg_b": "lighter"
+    }
+  ],
+  "subs": {
+    "HL": [
+      "0G",
+      "2Z",
+      "AAVE",
+      "ADA",
+      "AERO",
+      "APEX",
+      "APT",
+      "ARB",
+      "ASTER",
+      "AVAX",
+      "AVNT",
+      "AXS",
+      "AZTEC",
+      "BCH",
+      "BERA",
+      "BIO",
+      "BNB",
+      "BTC",
+      "CASHCAT",
+      "CC",
+      "CHIP",
+      "CRV",
+      "DASH",
+      "DOGE",
+      "DOT",
+      "DYDX",
+      "EIGEN",
+      "ENA",
+      "ETH",
+      "ETHFI",
+      "FARTCOIN",
+      "FIL",
+      "FOGO",
+      "GMX",
+      "GRAM",
+      "GRASS",
+      "HBAR",
+      "HYPE",
+      "ICP",
+      "JTO",
+      "JUP",
+      "KAITO",
+      "LDO",
+      "LINEA",
+      "LINK",
+      "LIT",
+      "LTC",
+      "MEGA",
+      "MET",
+      "MNT",
+      "MON",
+      "MORPHO",
+      "NEAR",
+      "ONDO",
+      "OP",
+      "PAXG",
+      "PENDLE",
+      "PENGU",
+      "POL",
+      "PONS",
+      "POPCAT",
+      "PROVE",
+      "PUMP",
+      "PYTH",
+      "RESOLV",
+      "S",
+      "SEI",
+      "SKR",
+      "SKY",
+      "SOL",
+      "SPX",
+      "STABLE",
+      "STBL",
+      "STRK",
+      "SUI",
+      "SYRUP",
+      "TAO",
+      "TIA",
+      "TRUMP",
+      "TRX",
+      "UNI",
+      "USELESS",
+      "VIRTUAL",
+      "VVV",
+      "WIF",
+      "WLD",
+      "WLFI",
+      "XLM",
+      "XMR",
+      "XPL",
+      "XRP",
+      "ZEC",
+      "ZK",
+      "ZORA",
+      "ZRO"
+    ],
+    "lighter": [
+      "0G",
+      "2Z",
+      "AAPL",
+      "AAVE",
+      "ADA",
+      "AERO",
+      "AI",
+      "AMD",
+      "AMZN",
+      "ANSEM",
+      "ANTHROPIC",
+      "APEX",
+      "APT",
+      "ARB",
+      "ASTER",
+      "AVAX",
+      "AVNT",
+      "AXS",
+      "AZTEC",
+      "BABA",
+      "BCH",
+      "BE",
+      "BERA",
+      "BIO",
+      "BNB",
+      "BTC",
+      "CASHCAT",
+      "CC",
+      "CHIP",
+      "COIN",
+      "CRCL",
+      "CRV",
+      "CRWV",
+      "DASH",
+      "DOGE",
+      "DOT",
+      "DYDX",
+      "EIGEN",
+      "ENA",
+      "ETH",
+      "ETHFI",
+      "FARTCOIN",
+      "FIL",
+      "FOGO",
+      "GMX",
+      "GOOGL",
+      "GRAM",
+      "GRASS",
+      "HBAR",
+      "HYPE",
+      "ICP",
+      "INTC",
+      "JTO",
+      "JUP",
+      "KAITO",
+      "LDO",
+      "LINEA",
+      "LINK",
+      "LIT",
+      "LTC",
+      "MEGA",
+      "MET",
+      "META",
+      "MNT",
+      "MON",
+      "MORPHO",
+      "MSFT",
+      "MU",
+      "NEAR",
+      "NVDA",
+      "ONDO",
+      "OP",
+      "OPENAI",
+      "ORCL",
+      "PAXG",
+      "PENDLE",
+      "PENGU",
+      "PLTR",
+      "POL",
+      "PONS",
+      "POPCAT",
+      "PROVE",
+      "PUMP",
+      "PYTH",
+      "QQQ",
+      "RESOLV",
+      "S",
+      "SEI",
+      "SHEIN",
+      "SKHY",
+      "SKR",
+      "SKY",
+      "SNDK",
+      "SOL",
+      "SOXL",
+      "SPCX",
+      "SPX",
+      "SPY",
+      "STABLE",
+      "STBL",
+      "STRK",
+      "SUI",
+      "SYRUP",
+      "TAO",
+      "TIA",
+      "TRUMP",
+      "TRX",
+      "TSLA",
+      "TSM",
+      "UNI",
+      "USELESS",
+      "VIRTUAL",
+      "VVV",
+      "WIF",
+      "WLD",
+      "WLFI",
+      "XAG",
+      "XAU",
+      "XLM",
+      "XMR",
+      "XPL",
+      "XRP",
+      "ZEC",
+      "ZK",
+      "ZORA",
+      "ZRO"
+    ],
+    "lighter-rh": [
+      "AAPL",
+      "AI",
+      "AMD",
+      "AMZN",
+      "ANSEM",
+      "ANTHROPIC",
+      "BABA",
+      "BE",
+      "BTC",
+      "CASHCAT",
+      "COIN",
+      "CRCL",
+      "CRWV",
+      "ETH",
+      "GOOGL",
+      "HYPE",
+      "INTC",
+      "LIT",
+      "META",
+      "MSFT",
+      "MU",
+      "NEAR",
+      "NVDA",
+      "OPENAI",
+      "ORCL",
+      "PLTR",
+      "PONS",
+      "QQQ",
+      "SHEIN",
+      "SKHY",
+      "SNDK",
+      "SOL",
+      "SOXL",
+      "SPCX",
+      "SPY",
+      "SUI",
+      "TSLA",
+      "TSM",
+      "VVV",
+      "XAG",
+      "XAU",
+      "XRP",
+      "ZEC"
+    ]
+  },
+  "native": {
+    "HL": {
+      "BTC": {
+        "coin": "BTC",
+        "vol24": 2206354626.0119987
+      },
+      "ETH": {
+        "coin": "ETH",
+        "vol24": 1152989545.3115218
+      },
+      "DYDX": {
+        "coin": "DYDX",
+        "vol24": 192455.535479
+      },
+      "SOL": {
+        "coin": "SOL",
+        "vol24": 223630653.96114007
+      },
+      "AVAX": {
+        "coin": "AVAX",
+        "vol24": 4531245.196505998
+      },
+      "BNB": {
+        "coin": "BNB",
+        "vol24": 15250809.10341999
+      },
+      "OP": {
+        "coin": "OP",
+        "vol24": 737398.2131640001
+      },
+      "LTC": {
+        "coin": "LTC",
+        "vol24": 3299798.7026499994
+      },
+      "ARB": {
+        "coin": "ARB",
+        "vol24": 14360120.564871997
+      },
+      "DOGE": {
+        "coin": "DOGE",
+        "vol24": 14449287.5761
+      },
+      "SUI": {
+        "coin": "SUI",
+        "vol24": 9847456.813014
+      },
+      "CRV": {
+        "coin": "CRV",
+        "vol24": 6129889.355485996
+      },
+      "LDO": {
+        "coin": "LDO",
+        "vol24": 654183.1316640003
+      },
+      "LINK": {
+        "coin": "LINK",
+        "vol24": 9305726.287900008
+      },
+      "GMX": {
+        "coin": "GMX",
+        "vol24": 119842.781898
+      },
+      "XRP": {
+        "coin": "XRP",
+        "vol24": 91049322.06139998
+      },
+      "BCH": {
+        "coin": "BCH",
+        "vol24": 3546052.903179999
+      },
+      "APT": {
+        "coin": "APT",
+        "vol24": 2466364.1696429993
+      },
+      "AAVE": {
+        "coin": "AAVE",
+        "vol24": 6886593.2227
+      },
+      "WLD": {
+        "coin": "WLD",
+        "vol24": 8321901.544263999
+      },
+      "TRX": {
+        "coin": "TRX",
+        "vol24": 1860030.6003600007
+      },
+      "UNI": {
+        "coin": "UNI",
+        "vol24": 19218793.862680003
+      },
+      "SEI": {
+        "coin": "SEI",
+        "vol24": 518094.4662019996
+      },
+      "ZRO": {
+        "coin": "ZRO",
+        "vol24": 1169900.0114100007
+      },
+      "DOT": {
+        "coin": "DOT",
+        "vol24": 3817902.8508400004
+      },
+      "TIA": {
+        "coin": "TIA",
+        "vol24": 927895.6445910007
+      },
+      "ADA": {
+        "coin": "ADA",
+        "vol24": 7990579.612770001
+      },
+      "PENDLE": {
+        "coin": "PENDLE",
+        "vol24": 1476029.5194999995
+      },
+      "NEAR": {
+        "coin": "NEAR",
+        "vol24": 60764164.47609998
+      },
+      "FIL": {
+        "coin": "FIL",
+        "vol24": 659478.6255360001
+      },
+      "PYTH": {
+        "coin": "PYTH",
+        "vol24": 456393.102281
+      },
+      "JUP": {
+        "coin": "JUP",
+        "vol24": 1799097.8205199998
+      },
+      "JTO": {
+        "coin": "JTO",
+        "vol24": 936243.3405100001
+      },
+      "WIF": {
+        "coin": "WIF",
+        "vol24": 400668.95717
+      },
+      "ONDO": {
+        "coin": "ONDO",
+        "vol24": 3930796.631639996
+      },
+      "STRK": {
+        "coin": "STRK",
+        "vol24": 1906959.7751480006
+      },
+      "TAO": {
+        "coin": "TAO",
+        "vol24": 23750322.183670003
+      },
+      "ETHFI": {
+        "coin": "ETHFI",
+        "vol24": 23254507.338238005
+      },
+      "ENA": {
+        "coin": "ENA",
+        "vol24": 19115843.204279996
+      },
+      "MNT": {
+        "coin": "MNT",
+        "vol24": 288094.5729809999
+      },
+      "HBAR": {
+        "coin": "HBAR",
+        "vol24": 1010171.6987510001
+      },
+      "POPCAT": {
+        "coin": "POPCAT",
+        "vol24": 149415.144207
+      },
+      "EIGEN": {
+        "coin": "EIGEN",
+        "vol24": 962282.7183360002
+      },
+      "ZK": {
+        "coin": "ZK",
+        "vol24": 184134.687177
+      },
+      "POL": {
+        "coin": "POL",
+        "vol24": 1525527.3920799992
+      },
+      "GRASS": {
+        "coin": "GRASS",
+        "vol24": 1556264.2789980003
+      },
+      "XLM": {
+        "coin": "XLM",
+        "vol24": 1528746.2289100003
+      },
+      "HYPE": {
+        "coin": "HYPE",
+        "vol24": 638839230.6245811
+      },
+      "VIRTUAL": {
+        "coin": "VIRTUAL",
+        "vol24": 3446719.2281520017
+      },
+      "PENGU": {
+        "coin": "PENGU",
+        "vol24": 2133419.4663210004
+      },
+      "FARTCOIN": {
+        "coin": "FARTCOIN",
+        "vol24": 12044003.194930006
+      },
+      "BIO": {
+        "coin": "BIO",
+        "vol24": 137523.788462
+      },
+      "SPX": {
+        "coin": "SPX",
+        "vol24": 2141574.8124029995
+      },
+      "S": {
+        "coin": "S",
+        "vol24": 285928.8111200001
+      },
+      "MORPHO": {
+        "coin": "MORPHO",
+        "vol24": 1317484.7948699994
+      },
+      "TRUMP": {
+        "coin": "TRUMP",
+        "vol24": 6826025.216249999
+      },
+      "VVV": {
+        "coin": "VVV",
+        "vol24": 32362974.250690006
+      },
+      "BERA": {
+        "coin": "BERA",
+        "vol24": 175023.021054
+      },
+      "KAITO": {
+        "coin": "KAITO",
+        "vol24": 290061.09027
+      },
+      "PAXG": {
+        "coin": "PAXG",
+        "vol24": 3996948.176200001
+      },
+      "ZORA": {
+        "coin": "ZORA",
+        "vol24": 443855.9723669999
+      },
+      "RESOLV": {
+        "coin": "RESOLV",
+        "vol24": 70308.231111
+      },
+      "SYRUP": {
+        "coin": "SYRUP",
+        "vol24": 704327.5919199999
+      },
+      "PUMP": {
+        "coin": "PUMP",
+        "vol24": 98261814.17418301
+      },
+      "PROVE": {
+        "coin": "PROVE",
+        "vol24": 74979.05905
+      },
+      "XPL": {
+        "coin": "XPL",
+        "vol24": 9021946.397098009
+      },
+      "WLFI": {
+        "coin": "WLFI",
+        "vol24": 1630714.8564060004
+      },
+      "LINEA": {
+        "coin": "LINEA",
+        "vol24": 101119.9266079999
+      },
+      "SKY": {
+        "coin": "SKY",
+        "vol24": 340770.5568829999
+      },
+      "ASTER": {
+        "coin": "ASTER",
+        "vol24": 3326987.58097
+      },
+      "AVNT": {
+        "coin": "AVNT",
+        "vol24": 137184.449711
+      },
+      "STBL": {
+        "coin": "STBL",
+        "vol24": 360087.0174749999
+      },
+      "0G": {
+        "coin": "0G",
+        "vol24": 173980.54094
+      },
+      "APEX": {
+        "coin": "APEX",
+        "vol24": 343195.3939399999
+      },
+      "2Z": {
+        "coin": "2Z",
+        "vol24": 210078.001811
+      },
+      "ZEC": {
+        "coin": "ZEC",
+        "vol24": 631842570.5680003
+      },
+      "MON": {
+        "coin": "MON",
+        "vol24": 5505253.805068999
+      },
+      "MET": {
+        "coin": "MET",
+        "vol24": 2542915.408739998
+      },
+      "MEGA": {
+        "coin": "MEGA",
+        "vol24": 289653.090275
+      },
+      "CC": {
+        "coin": "CC",
+        "vol24": 856375.5641170008
+      },
+      "ICP": {
+        "coin": "ICP",
+        "vol24": 1192247.5703099999
+      },
+      "AERO": {
+        "coin": "AERO",
+        "vol24": 2492970.25777
+      },
+      "STABLE": {
+        "coin": "STABLE",
+        "vol24": 407654.874548
+      },
+      "FOGO": {
+        "coin": "FOGO",
+        "vol24": 79760.822779
+      },
+      "LIT": {
+        "coin": "LIT",
+        "vol24": 49733368.97570002
+      },
+      "XMR": {
+        "coin": "XMR",
+        "vol24": 20702732.178949974
+      },
+      "AXS": {
+        "coin": "AXS",
+        "vol24": 112776.394076
+      },
+      "DASH": {
+        "coin": "DASH",
+        "vol24": 3137521.4232599996
+      },
+      "SKR": {
+        "coin": "SKR",
+        "vol24": 1211962.898799
+      },
+      "AZTEC": {
+        "coin": "AZTEC",
+        "vol24": 157462.768031
+      },
+      "CHIP": {
+        "coin": "CHIP",
+        "vol24": 11067472.660079
+      },
+      "GRAM": {
+        "coin": "GRAM",
+        "vol24": 1288721.6068
+      },
+      "CASHCAT": {
+        "coin": "CASHCAT",
+        "vol24": 18574629.72320999
+      },
+      "PONS": {
+        "coin": "PONS",
+        "vol24": 85867799.83786
+      },
+      "USELESS": {
+        "coin": "USELESS",
+        "vol24": 10515561.184229994
+      }
+    },
+    "lighter": {
+      "BTC": {
+        "market_id": 1,
+        "vol24": 604208677.321566,
+        "created_at": "1737098461107"
+      },
+      "ETH": {
+        "market_id": 0,
+        "vol24": 304014747.392306,
+        "created_at": "1737098461100"
+      },
+      "DYDX": {
+        "market_id": 62,
+        "vol24": 87855.778354,
+        "created_at": "1755189641732"
+      },
+      "SOL": {
+        "market_id": 2,
+        "vol24": 51953878.545575,
+        "created_at": "1737098461127"
+      },
+      "AVAX": {
+        "market_id": 9,
+        "vol24": 521507.365241,
+        "created_at": "1737098461262"
+      },
+      "BNB": {
+        "market_id": 25,
+        "vol24": 3688288.44708,
+        "created_at": "1740427714620"
+      },
+      "OP": {
+        "market_id": 55,
+        "vol24": 336126.691222,
+        "created_at": "1753809197905"
+      },
+      "LTC": {
+        "market_id": 35,
+        "vol24": 343642.64560499997,
+        "created_at": "1743182782837"
+      },
+      "ARB": {
+        "market_id": 50,
+        "vol24": 1746889.535011,
+        "created_at": "1753717333426"
+      },
+      "DOGE": {
+        "market_id": 3,
+        "vol24": 1013437.850052,
+        "created_at": "1737098461147"
+      },
+      "SUI": {
+        "market_id": 16,
+        "vol24": 934644.789113,
+        "created_at": "1738358834905"
+      },
+      "CRV": {
+        "market_id": 36,
+        "vol24": 119154.073675,
+        "created_at": "1745443199889"
+      },
+      "LDO": {
+        "market_id": 46,
+        "vol24": 188819.217251,
+        "created_at": "1753266633953"
+      },
+      "LINK": {
+        "market_id": 8,
+        "vol24": 931000.976134,
+        "created_at": "1737098461243"
+      },
+      "GMX": {
+        "market_id": 61,
+        "vol24": 60958.652691,
+        "created_at": "1755189629810"
+      },
+      "XRP": {
+        "market_id": 7,
+        "vol24": 5198754.509173,
+        "created_at": "1737098461225"
+      },
+      "BCH": {
+        "market_id": 58,
+        "vol24": 299033.708423,
+        "created_at": "1754666072358"
+      },
+      "APT": {
+        "market_id": 31,
+        "vol24": 255169.782913,
+        "created_at": "1741981584411"
+      },
+      "AAVE": {
+        "market_id": 27,
+        "vol24": 491526.574959,
+        "created_at": "1741193029540"
+      },
+      "WLD": {
+        "market_id": 6,
+        "vol24": 451225.859799,
+        "created_at": "1737098461206"
+      },
+      "TRX": {
+        "market_id": 43,
+        "vol24": 157130.51158700002,
+        "created_at": "1751386219190"
+      },
+      "UNI": {
+        "market_id": 30,
+        "vol24": 1208945.018759,
+        "created_at": "1741193101476"
+      },
+      "SEI": {
+        "market_id": 32,
+        "vol24": 253798.67756,
+        "created_at": "1741981597202"
+      },
+      "ZRO": {
+        "market_id": 60,
+        "vol24": 169534.66605200002,
+        "created_at": "1754666096603"
+      },
+      "DOT": {
+        "market_id": 11,
+        "vol24": 376670.938864,
+        "created_at": "1737098461300"
+      },
+      "TIA": {
+        "market_id": 67,
+        "vol24": 73156.03727,
+        "created_at": "1755711226047"
+      },
+      "ADA": {
+        "market_id": 39,
+        "vol24": 707090.982164,
+        "created_at": "1747326422205"
+      },
+      "PENDLE": {
+        "market_id": 37,
+        "vol24": 211857.174025,
+        "created_at": "1745443211838"
+      },
+      "NEAR": {
+        "market_id": 10,
+        "vol24": 5296512.8992,
+        "created_at": "1737098461281"
+      },
+      "FIL": {
+        "market_id": 103,
+        "vol24": 94065.846449,
+        "created_at": "1762627046370"
+      },
+      "PYTH": {
+        "market_id": 78,
+        "vol24": 162457.402119,
+        "created_at": "1757338780882"
+      },
+      "JUP": {
+        "market_id": 26,
+        "vol24": 442607.501892,
+        "created_at": "1740427715306"
+      },
+      "JTO": {
+        "market_id": 134,
+        "vol24": 174863.983123,
+        "created_at": "1770321027659"
+      },
+      "WIF": {
+        "market_id": 5,
+        "vol24": 196916.027247,
+        "created_at": "1737098461187"
+      },
+      "ONDO": {
+        "market_id": 38,
+        "vol24": 367551.517986,
+        "created_at": "1745443223573"
+      },
+      "STRK": {
+        "market_id": 104,
+        "vol24": 112975.845881,
+        "created_at": "1762627046949"
+      },
+      "TAO": {
+        "market_id": 13,
+        "vol24": 753225.547424,
+        "created_at": "1737098461338"
+      },
+      "ETHFI": {
+        "market_id": 64,
+        "vol24": 1821878.976568,
+        "created_at": "1755189665870"
+      },
+      "ENA": {
+        "market_id": 29,
+        "vol24": 1560551.632211,
+        "created_at": "1741193089539"
+      },
+      "MNT": {
+        "market_id": 63,
+        "vol24": 79371.42297099999,
+        "created_at": "1755189653857"
+      },
+      "HBAR": {
+        "market_id": 59,
+        "vol24": 198534.319368,
+        "created_at": "1754666084541"
+      },
+      "POPCAT": {
+        "market_id": 23,
+        "vol24": 36443.510329000004,
+        "created_at": "1739641288846"
+      },
+      "EIGEN": {
+        "market_id": 49,
+        "vol24": 157928.958913,
+        "created_at": "1753717320938"
+      },
+      "ZK": {
+        "market_id": 56,
+        "vol24": 103562.115476,
+        "created_at": "1753809210196"
+      },
+      "POL": {
+        "market_id": 14,
+        "vol24": 249909.914488,
+        "created_at": "1737098461356"
+      },
+      "GRASS": {
+        "market_id": 52,
+        "vol24": 55302.801972,
+        "created_at": "1753809161649"
+      },
+      "XLM": {
+        "market_id": 119,
+        "vol24": 123481.392346,
+        "created_at": "1765485938795"
+      },
+      "HYPE": {
+        "market_id": 24,
+        "vol24": 63634462.769767,
+        "created_at": "1740427690638"
+      },
+      "VIRTUAL": {
+        "market_id": 41,
+        "vol24": 318360.770487,
+        "created_at": "1749842289899"
+      },
+      "PENGU": {
+        "market_id": 47,
+        "vol24": 224391.466935,
+        "created_at": "1753266646633"
+      },
+      "FARTCOIN": {
+        "market_id": 21,
+        "vol24": 584837.742293,
+        "created_at": "1739641263879"
+      },
+      "BIO": {
+        "market_id": 171,
+        "vol24": 38351.804298,
+        "created_at": "1778529708231"
+      },
+      "SPX": {
+        "market_id": 42,
+        "vol24": 152452.769523,
+        "created_at": "1749842301453"
+      },
+      "S": {
+        "market_id": 40,
+        "vol24": 66548.443203,
+        "created_at": "1747326434871"
+      },
+      "MORPHO": {
+        "market_id": 68,
+        "vol24": 57853.588659,
+        "created_at": "1755711237917"
+      },
+      "TRUMP": {
+        "market_id": 15,
+        "vol24": 977647.86351,
+        "created_at": "1738256715579"
+      },
+      "VVV": {
+        "market_id": 69,
+        "vol24": 1178101.452508,
+        "created_at": "1755711250173"
+      },
+      "BERA": {
+        "market_id": 20,
+        "vol24": 65942.339857,
+        "created_at": "1739641252448"
+      },
+      "KAITO": {
+        "market_id": 33,
+        "vol24": 73852.10463899998,
+        "created_at": "1743182734785"
+      },
+      "PAXG": {
+        "market_id": 48,
+        "vol24": 1300823.144698,
+        "created_at": "1753717308876"
+      },
+      "ZORA": {
+        "market_id": 53,
+        "vol24": 45781.895360999995,
+        "created_at": "1753809173787"
+      },
+      "RESOLV": {
+        "market_id": 51,
+        "vol24": 23764.540138999997,
+        "created_at": "1753809149798"
+      },
+      "SYRUP": {
+        "market_id": 44,
+        "vol24": 75254.823189,
+        "created_at": "1751386231037"
+      },
+      "PUMP": {
+        "market_id": 45,
+        "vol24": 6489761.163803,
+        "created_at": "1752514693101"
+      },
+      "PROVE": {
+        "market_id": 57,
+        "vol24": 13966.254197,
+        "created_at": "1754415293933"
+      },
+      "XPL": {
+        "market_id": 71,
+        "vol24": 547122.654724,
+        "created_at": "1756225866568"
+      },
+      "WLFI": {
+        "market_id": 72,
+        "vol24": 179261.7476,
+        "created_at": "1756225882260"
+      },
+      "LINEA": {
+        "market_id": 76,
+        "vol24": 7159.055266,
+        "created_at": "1756725952123"
+      },
+      "SKY": {
+        "market_id": 79,
+        "vol24": 98999.39030900001,
+        "created_at": "1758191584762"
+      },
+      "ASTER": {
+        "market_id": 83,
+        "vol24": 857273.326806,
+        "created_at": "1758207890540"
+      },
+      "AVNT": {
+        "market_id": 82,
+        "vol24": 51783.202351,
+        "created_at": "1758191620704"
+      },
+      "STBL": {
+        "market_id": 85,
+        "vol24": 67832.59155,
+        "created_at": "1758726443506"
+      },
+      "0G": {
+        "market_id": 84,
+        "vol24": 42336.971894,
+        "created_at": "1758726431503"
+      },
+      "APEX": {
+        "market_id": 86,
+        "vol24": 19964.459479,
+        "created_at": "1759054813900"
+      },
+      "2Z": {
+        "market_id": 88,
+        "vol24": 188.906576,
+        "created_at": "1759422098246"
+      },
+      "ZEC": {
+        "market_id": 90,
+        "vol24": 34996065.220598,
+        "created_at": "1759488237281"
+      },
+      "MON": {
+        "market_id": 91,
+        "vol24": 433868.152466,
+        "created_at": "1759918598028"
+      },
+      "MET": {
+        "market_id": 95,
+        "vol24": 244642.206373,
+        "created_at": "1761324910009"
+      },
+      "MEGA": {
+        "market_id": 94,
+        "vol24": 56072.059189,
+        "created_at": "1761167001648"
+      },
+      "CC": {
+        "market_id": 101,
+        "vol24": 125478.250114,
+        "created_at": "1762182031545"
+      },
+      "ICP": {
+        "market_id": 102,
+        "vol24": 152333.118513,
+        "created_at": "1762627034219"
+      },
+      "AERO": {
+        "market_id": 65,
+        "vol24": 777084.6503,
+        "created_at": "1755189677789"
+      },
+      "STABLE": {
+        "market_id": 118,
+        "vol24": 1622.228997,
+        "created_at": "1765485938719"
+      },
+      "FOGO": {
+        "market_id": 124,
+        "vol24": 1932.77242,
+        "created_at": "1768486801655"
+      },
+      "LIT": {
+        "market_id": 120,
+        "vol24": 22837619.631715,
+        "created_at": "1767373259151"
+      },
+      "XMR": {
+        "market_id": 77,
+        "vol24": 1624860.950108,
+        "created_at": "1757338778663"
+      },
+      "AXS": {
+        "market_id": 131,
+        "vol24": 52448.993084999995,
+        "created_at": "1769188596996"
+      },
+      "DASH": {
+        "market_id": 127,
+        "vol24": 87698.674215,
+        "created_at": "1769097406145"
+      },
+      "SKR": {
+        "market_id": 130,
+        "vol24": 9624.563466,
+        "created_at": "1769188596989"
+      },
+      "AZTEC": {
+        "market_id": 144,
+        "vol24": 24660.668499,
+        "created_at": "1770885132385"
+      },
+      "CHIP": {
+        "market_id": 163,
+        "vol24": 275103.10374,
+        "created_at": "1776802540133"
+      },
+      "GRAM": {
+        "market_id": 12,
+        "vol24": 728638.87806,
+        "created_at": "1737098461318"
+      },
+      "CASHCAT": {
+        "market_id": 221,
+        "vol24": 1613121.210382,
+        "created_at": "1786035100213"
+      },
+      "PONS": {
+        "market_id": 231,
+        "vol24": 3035512.864283,
+        "created_at": "1788369977354"
+      },
+      "USELESS": {
+        "market_id": 66,
+        "vol24": 2690886.0631730002,
+        "created_at": "1755711215269"
+      },
+      "AMD": {
+        "market_id": 138,
+        "vol24": 113000.976377,
+        "created_at": "1770669512153"
+      },
+      "NVDA": {
+        "market_id": 110,
+        "vol24": 3855518.324492,
+        "created_at": "1764167969615"
+      },
+      "OPENAI": {
+        "market_id": 192,
+        "vol24": 694963.053038,
+        "created_at": "1780655309694"
+      },
+      "SHEIN": {
+        "market_id": 230,
+        "vol24": 791784.135283,
+        "created_at": "1787917930714"
+      },
+      "SPY": {
+        "market_id": 128,
+        "vol24": 2696284.015182,
+        "created_at": "1769097406146"
+      },
+      "QQQ": {
+        "market_id": 129,
+        "vol24": 3350729.684164,
+        "created_at": "1769097406175"
+      },
+      "INTC": {
+        "market_id": 137,
+        "vol24": 425074.918723,
+        "created_at": "1770669512152"
+      },
+      "PLTR": {
+        "market_id": 111,
+        "vol24": 92607.596393,
+        "created_at": "1764167981632"
+      },
+      "BE": {
+        "market_id": 196,
+        "vol24": 0.0,
+        "created_at": "1781190442900"
+      },
+      "COIN": {
+        "market_id": 109,
+        "vol24": 1035984.386784,
+        "created_at": "1764093549135"
+      },
+      "MU": {
+        "market_id": 164,
+        "vol24": 3490894.29621,
+        "created_at": "1777566285723"
+      },
+      "TSLA": {
+        "market_id": 112,
+        "vol24": 937387.625681,
+        "created_at": "1764167993606"
+      },
+      "CRWV": {
+        "market_id": 167,
+        "vol24": 19490.296508,
+        "created_at": "1778090119190"
+      },
+      "ORCL": {
+        "market_id": 165,
+        "vol24": 2199388.566286,
+        "created_at": "1777566285742"
+      },
+      "TSM": {
+        "market_id": 168,
+        "vol24": 54488.143224,
+        "created_at": "1778090119199"
+      },
+      "BABA": {
+        "market_id": 177,
+        "vol24": 161732.248347,
+        "created_at": "1779291189898"
+      },
+      "META": {
+        "market_id": 117,
+        "vol24": 933082.840694,
+        "created_at": "1764342093420"
+      },
+      "MSFT": {
+        "market_id": 115,
+        "vol24": 8295285.263787,
+        "created_at": "1764342057501"
+      },
+      "AAPL": {
+        "market_id": 113,
+        "vol24": 2491404.207316,
+        "created_at": "1764342033347"
+      },
+      "SOXL": {
+        "market_id": 197,
+        "vol24": 1793094.619706,
+        "created_at": "1781190442993"
+      },
+      "AI": {
+        "market_id": 232,
+        "vol24": 804840.115606,
+        "created_at": "1788369977362"
+      },
+      "SPCX": {
+        "market_id": 194,
+        "vol24": 5066136.36193,
+        "created_at": "1781268147643"
+      },
+      "CRCL": {
+        "market_id": 121,
+        "vol24": 779973.115114,
+        "created_at": "1767814866811"
+      },
+      "ANTHROPIC": {
+        "market_id": 193,
+        "vol24": 420864.165205,
+        "created_at": "1780826545083"
+      },
+      "XAG": {
+        "market_id": 93,
+        "vol24": 12320517.630368,
+        "created_at": "1760970348731"
+      },
+      "SKHY": {
+        "market_id": 216,
+        "vol24": 1224825.471461,
+        "created_at": "1784051694386"
+      },
+      "SNDK": {
+        "market_id": 139,
+        "vol24": 11890496.722726,
+        "created_at": "1770669512154"
+      },
+      "ANSEM": {
+        "market_id": 219,
+        "vol24": 323893.424526,
+        "created_at": "1785337042413"
+      },
+      "GOOGL": {
+        "market_id": 116,
+        "vol24": 1102456.719126,
+        "created_at": "1764342069407"
+      },
+      "XAU": {
+        "market_id": 92,
+        "vol24": 64291399.927969,
+        "created_at": "1760970336561"
+      },
+      "AMZN": {
+        "market_id": 114,
+        "vol24": 188105.538083,
+        "created_at": "1764342045376"
+      }
+    },
+    "lighter-rh": {
+      "BTC": {
+        "market_id": 1,
+        "vol24": 90504639.722065,
+        "created_at": "1782499410902"
+      },
+      "ETH": {
+        "market_id": 0,
+        "vol24": 40493064.759098,
+        "created_at": "1782499410884"
+      },
+      "SOL": {
+        "market_id": 3,
+        "vol24": 9807248.629988,
+        "created_at": "1782499410942"
+      },
+      "SUI": {
+        "market_id": 9,
+        "vol24": 370763.393918,
+        "created_at": "1782499411043"
+      },
+      "XRP": {
+        "market_id": 6,
+        "vol24": 511980.612037,
+        "created_at": "1782499410995"
+      },
+      "NEAR": {
+        "market_id": 7,
+        "vol24": 876183.974034,
+        "created_at": "1782499411009"
+      },
+      "HYPE": {
+        "market_id": 2,
+        "vol24": 11933258.068847,
+        "created_at": "1782499410924"
+      },
+      "VVV": {
+        "market_id": 8,
+        "vol24": 293476.998975,
+        "created_at": "1782499411025"
+      },
+      "ZEC": {
+        "market_id": 4,
+        "vol24": 4656492.455145,
+        "created_at": "1782499410959"
+      },
+      "LIT": {
+        "market_id": 5,
+        "vol24": 5074264.141438,
+        "created_at": "1782499410978"
+      },
+      "CASHCAT": {
+        "market_id": 36,
+        "vol24": 162483.199065,
+        "created_at": "1783520329889"
+      },
+      "PONS": {
+        "market_id": 44,
+        "vol24": 927492.16744,
+        "created_at": "1788279534312"
+      },
+      "AMD": {
+        "market_id": 29,
+        "vol24": 262825.749547,
+        "created_at": "1782499411319"
+      },
+      "NVDA": {
+        "market_id": 15,
+        "vol24": 7380877.748637,
+        "created_at": "1782499411125"
+      },
+      "OPENAI": {
+        "market_id": 42,
+        "vol24": 4965440.620439,
+        "created_at": "1787759646334"
+      },
+      "SHEIN": {
+        "market_id": 43,
+        "vol24": 39366.028706,
+        "created_at": "1787931742200"
+      },
+      "SPY": {
+        "market_id": 26,
+        "vol24": 44762373.989867,
+        "created_at": "1782499411277"
+      },
+      "QQQ": {
+        "market_id": 25,
+        "vol24": 30426439.657021,
+        "created_at": "1782499411266"
+      },
+      "INTC": {
+        "market_id": 30,
+        "vol24": 1518643.005543,
+        "created_at": "1782499411333"
+      },
+      "PLTR": {
+        "market_id": 34,
+        "vol24": 156735.347155,
+        "created_at": "1782499411385"
+      },
+      "BE": {
+        "market_id": 20,
+        "vol24": 396075.841713,
+        "created_at": "1782499411200"
+      },
+      "COIN": {
+        "market_id": 23,
+        "vol24": 619301.870743,
+        "created_at": "1782499411240"
+      },
+      "MU": {
+        "market_id": 31,
+        "vol24": 3038742.286223,
+        "created_at": "1782499411346"
+      },
+      "TSLA": {
+        "market_id": 16,
+        "vol24": 1347647.967317,
+        "created_at": "1782499411147"
+      },
+      "CRWV": {
+        "market_id": 33,
+        "vol24": 373680.137928,
+        "created_at": "1782499411372"
+      },
+      "ORCL": {
+        "market_id": 17,
+        "vol24": 1626201.617777,
+        "created_at": "1782499411160"
+      },
+      "TSM": {
+        "market_id": 46,
+        "vol24": 241811.062013,
+        "created_at": "1788451245293"
+      },
+      "BABA": {
+        "market_id": 19,
+        "vol24": 59438.212203,
+        "created_at": "1782499411187"
+      },
+      "META": {
+        "market_id": 13,
+        "vol24": 723401.806808,
+        "created_at": "1782499411099"
+      },
+      "MSFT": {
+        "market_id": 14,
+        "vol24": 506767.779226,
+        "created_at": "1782499411113"
+      },
+      "AAPL": {
+        "market_id": 10,
+        "vol24": 1827981.975716,
+        "created_at": "1782499411060"
+      },
+      "SOXL": {
+        "market_id": 35,
+        "vol24": 870996.491938,
+        "created_at": "1783519804637"
+      },
+      "AI": {
+        "market_id": 45,
+        "vol24": 85951.672264,
+        "created_at": "1788362187298"
+      },
+      "SPCX": {
+        "market_id": 18,
+        "vol24": 4148459.479142,
+        "created_at": "1782499411174"
+      },
+      "CRCL": {
+        "market_id": 24,
+        "vol24": 1190539.147353,
+        "created_at": "1782499411253"
+      },
+      "ANTHROPIC": {
+        "market_id": 38,
+        "vol24": 8901585.217681,
+        "created_at": "1783961547574"
+      },
+      "XAG": {
+        "market_id": 41,
+        "vol24": 11084001.910495,
+        "created_at": "1787593716939"
+      },
+      "SKHY": {
+        "market_id": 37,
+        "vol24": 1545909.472358,
+        "created_at": "1783961546565"
+      },
+      "SNDK": {
+        "market_id": 32,
+        "vol24": 8170972.4138009995,
+        "created_at": "1782499411358"
+      },
+      "ANSEM": {
+        "market_id": 39,
+        "vol24": 275303.701878,
+        "created_at": "1786729073837"
+      },
+      "GOOGL": {
+        "market_id": 12,
+        "vol24": 2873983.971362,
+        "created_at": "1782499411086"
+      },
+      "XAU": {
+        "market_id": 40,
+        "vol24": 29957163.018905,
+        "created_at": "1787593716614"
+      },
+      "AMZN": {
+        "market_id": 11,
+        "vol24": 274199.661901,
+        "created_at": "1782499411073"
+      }
+    }
+  }
+}
