@@ -43,10 +43,11 @@ HL 95 + lighter 126 + lighter-rh 43 = **264 個訂閱、三條連線**。
 ===========================================================================
 **已知的缺口，要先寫出來**
 ===========================================================================
-1. **資金費欄位會是空的。** `MinuteRecorder(funding=None)` -> 三個
-   `fund_*` 欄位留白。既有九個配對有資金費是因為它們跑完整引擎（帶
-   FundingPoller）。後果：新配對算不出成本模型的**桶 4（carry）**。
-   這是已知缺口不是 bug；要補就另外接一支逐場館的資金費輪詢。
+1. ~~資金費欄位會是空的~~ -> **2026-09-11 已補**：`MuxFundingPoller`
+   一個輪詢器服務全部配對（**3 個請求/輪**，跟配對數無關，因為那兩個端點
+   本來就是全量的）。解析抽到 `funding.fetch_hl_all` / `fetch_lighter_all`
+   當唯一一處，既有的 per-pair `FundingPoller` 改成呼叫它再挑一個
+   —— 反向驗過：兩者對 BTC 給出**完全相同**的 e/h/diff。
 2. **只有頂檔。** 欄位 schema 與既有 `minutes.csv` **逐欄相同**（刻意的：
    下游 `premium_verdict.load()` 因此一行都不用改），而那個 schema 只存
    最佳買賣與頂檔量。分檔深度仍然只有 REST 掃描器有。
@@ -87,6 +88,7 @@ sys.path.insert(0, str(ROOT))
 from entropy_arb.book import OrderBook                       # noqa: E402
 from entropy_arb.config import LIGHTER_PROFILES              # noqa: E402
 from entropy_arb.feeds import _chan_id                       # noqa: E402
+from entropy_arb.funding import MuxFundingPoller             # noqa: E402
 from entropy_arb.recorder import MinuteRecorder              # noqa: E402
 
 try:
@@ -314,7 +316,7 @@ class MuxLighterFeed:
             backoff = min(backoff * 2, 30.0)
 
 
-async def heartbeat(stop: asyncio.Event, books: dict, recs: list):
+async def heartbeat(stop: asyncio.Event, books: dict, recs: list, fund=None):
     """每 30 秒寫一次旗標＋印一行。`ok` = 連得上且設定對。"""
     while not stop.is_set():
         try:
@@ -322,8 +324,10 @@ async def heartbeat(stop: asyncio.Event, books: dict, recs: list):
             _stat["books_ready"] = ready
             _stat["rows"] = sum(r.rows_written for r in recs)
             ok = (_stat["frames"] > 0)
-            write_flag(ok, "ready=%d/%d rows=%d"
-                       % (ready, len(books), _stat["rows"]))
+            fcov = fund.coverage() if fund is not None else {}
+            write_flag(ok, "ready=%d/%d rows=%d fund=%s"
+                       % (ready, len(books), _stat["rows"],
+                          "/".join(str(v) for v in fcov.values()) or "—"))
             log.info("frames=%d ready=%d/%d rows=%d reconnects=%d",
                      _stat["frames"], ready, len(books), _stat["rows"],
                      _stat["reconnects"])
@@ -361,6 +365,14 @@ async def amain(a) -> int:
             books[(v, t)] = OrderBook()
             subs[v][t] = nat[t].get("coin") if v == "HL" else nat[t]["market_id"]
 
+    # 資金費（2026-09-11 補上原本宣告的缺口 1）：**一個輪詢器服務全部配對**。
+    # 既有的 FundingPoller 是一個配對一個、每輪 2 個請求 -> 150 個配對就是
+    # 300 個請求/輪。而那兩個端點本來就是全量的,所以多工版是 **3 個請求/輪**,
+    # 跟配對數無關。解析共用 `fetch_hl_all` / `fetch_lighter_all`（唯一一處）。
+    fund = MuxFundingPoller()
+    fund.start()
+    log.info("資金費覆蓋：%s", fund.coverage())
+
     recs = []
     for p in pairs:
         a_, b_ = books.get((p["leg_a"], p["ticker"])), books.get((p["leg_b"], p["ticker"]))
@@ -368,7 +380,9 @@ async def amain(a) -> int:
             continue
         d = OUTDIR / ("%s@%s-%s" % (p["ticker"], p["leg_a"], p["leg_b"]))
         recs.append(MinuteRecorder(str(d / "minutes.csv"), a_, b_,
-                                   staleness_sec=STALENESS_SEC, interval_sec=1.0))
+                                   staleness_sec=STALENESS_SEC, interval_sec=1.0,
+                                   funding=fund.view(p["leg_a"], p["leg_b"],
+                                                     p["ticker"])))
     print("配對 %d 個、簿口 %d 個、訂閱 %s"
           % (len(recs), len(books),
              " / ".join("%s %d" % (v, len(s)) for v, s in subs.items())))
@@ -382,7 +396,7 @@ async def amain(a) -> int:
         if subs[v]:
             tasks.append(asyncio.create_task(MuxLighterFeed(v, subs[v], books).run(stop)))
     tasks += [asyncio.create_task(r.run(stop)) for r in recs]
-    tasks.append(asyncio.create_task(heartbeat(stop, books, recs)))
+    tasks.append(asyncio.create_task(heartbeat(stop, books, recs, fund)))
 
     if a.seconds:
         try:
@@ -395,6 +409,7 @@ async def amain(a) -> int:
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    fund.stop()
     for r in recs:
         try:
             r.close()
