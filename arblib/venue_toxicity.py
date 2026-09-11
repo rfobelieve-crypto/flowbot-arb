@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -135,6 +136,14 @@ def report(pair, leg, res, T, half_spread_bps=None):
 
 
 def main():
+    # Windows 主控台預設 cp950，編不出判決行裡的 U+2212 減號——七個配對全都在
+    # 寫完 entropy 腿之後、寫 JSON 之前崩掉，hedge 腿一次都沒跑到。
+    # （同一個病在 engine 的日誌處理器上修過一次。）
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--pair", default="NBIS"); ap.add_argument("--leg", default="both")
     ap.add_argument("--T", type=int, default=60); ap.add_argument("--step", type=int, default=3)

@@ -206,6 +206,31 @@ def cost_breakdown(t: TradeSpec) -> dict:
                                         or tags[k].startswith("VERIFIED")) / len(tags), 2)}
 
 
+def _funding_from_csv(pid: str) -> dict:
+    """資金費差的中位數,直接從錄製器的 minutes.csv 取(新 schema 不帶它)。
+
+    回傳 {"median_bps_8h": x} 以對齊舊 schema 的欄位名;拿不到回 {}。
+    """
+    import csv as _csv
+    import glob as _g
+    import statistics as _st
+    sub = "minutes.csv" if pid == "SNDK" else f"{pid}/minutes.csv"
+    base = ROOT / "engine" / "logs" / sub
+    vals = []
+    for fp in [Path(x) for x in sorted(_g.glob(str(base) + "*.old"))] + [base]:
+        if not fp.exists():
+            continue
+        with open(fp, newline="", encoding="utf-8") as fh:
+            for r in _csv.DictReader(fh):
+                v = r.get("fund_diff_bps8h")
+                if v not in (None, ""):
+                    try:
+                        vals.append(float(v))
+                    except ValueError:
+                        pass
+    return {"median_bps_8h": _st.median(vals)} if vals else {}
+
+
 def family_specs(size_usd: float, mode: str) -> list[TradeSpec]:
     """Build one spec per recording-family pair from the frozen verdict json
     (band, convergence, depth, funding) — nothing is recomputed here."""
@@ -213,16 +238,37 @@ def family_specs(size_usd: float, mode: str) -> list[TradeSpec]:
     d = json.loads((ROOT / "results/arb_premium_verdict.json").read_text(encoding="utf-8"))
     specs = []
     for pid, p in d["pairs"].items():
+        # 2026-09-11 修：判決達標之後這份 json 的 schema 從 `interim` 換成
+        # `sides` + status="verdict"（premium_verdict 自己改的），而這裡只讀
+        # `interim`,於是 **`if not i: continue` 靜默跳過每一個配對** ->
+        # family_specs() 回傳空 list -> arb_cost_model.json 從 2026-09-05 起
+        # 就再也沒有被更新過,而下游(gate0_arb_unhedged / gate0_arb_capacity /
+        # TODO §1.20 的容量表)全都在讀那份舊檔。
+        # 失敗模式是**靜默**的:沒有例外、沒有空檔,只有一份不再變新的 json。
+        # 兩種 schema 都讀,並且**產出 0 個就大聲失敗**(見函式結尾)。
         i = p.get("interim") or {}
-        if not i:
-            continue
+        sides = p.get("sides") or {}
         va, vb = PV.VENUE_KEYS.get(pid, ("HL", "lighter"))
-        best = max((i.get("sell") or {}), (i.get("buy") or {}),
-                   key=lambda s: (s or {}).get("band_bps") or 0)
-        lab = "sell" if best is (i.get("sell") or {}) else "buy"
-        conv = i.get(f"conv_{lab}") or {}
-        dep = i.get(f"depth_{lab}") or {}
-        f = i.get("funding") or {}
+        if i:
+            best = max((i.get("sell") or {}), (i.get("buy") or {}),
+                       key=lambda s: (s or {}).get("band_bps") or 0)
+            lab = "sell" if best is (i.get("sell") or {}) else "buy"
+            conv = i.get(f"conv_{lab}") or {}
+            dep = i.get(f"depth_{lab}") or {}
+            f = i.get("funding") or {}
+        elif sides:
+            # `full` 是該側的 band/fires;convergence 與 depth 各自掛在側底下
+            lab = max(("sell", "buy"),
+                      key=lambda L: (((sides.get(L) or {}).get("full") or {})
+                                     .get("band_bps") or 0))
+            best = ((sides.get(lab) or {}).get("full") or {})
+            conv = (sides.get(lab) or {}).get("convergence") or {}
+            dep = (sides.get(lab) or {}).get("depth") or {}
+            # **新 schema 不帶 funding**。從錄製器的 CSV 直接取中位數
+            # (MEASURED,不是 ASSUMED);拿不到就是 0.0 並在 notes 標明。
+            f = _funding_from_csv(pid)
+        else:
+            continue
         days = max(p.get("days") or 1e-9, 1e-9)
         top = float(dep.get("fat_median_notional_usd") or 0)
         specs.append(TradeSpec(
@@ -236,6 +282,13 @@ def family_specs(size_usd: float, mode: str) -> list[TradeSpec]:
             mode=mode,
             notes=[f"side={lab}", "depth buckets ASSUMED from top x4.5"]))
         specs[-1].pid = pid                                       # type: ignore[attr-defined]
+    if not specs:
+        # 2026-09-11:這正是讓 arb_cost_model.json 停在 09-05 的那個靜默失敗。
+        # 空輸出在這裡**永遠不是合法狀態**——家族有 8-9 個配對。
+        raise RuntimeError(
+            "family_specs() 產出 0 個配對。arb_premium_verdict.json 的 schema "
+            "可能又換了(現在認得 `interim` 與 `sides` 兩種)。**不要讓它回空 list** "
+            "——下游會安靜地繼續讀上一份舊的 arb_cost_model.json。")
     return specs
 
 
