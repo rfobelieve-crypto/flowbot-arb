@@ -39,7 +39,7 @@ $Members = [ordered]@{
   # 2026-09-11 §1.25：宇宙級錄製器。它不是 main.py,所以比對式要另一條
   # （見下面的 -or）。少了這一條它死掉就沒人拉起來,而它錄的是
   # **不可回填**的分鐘資料。
-  'universe' = @('toolsecord_universe.py', 'run_recorder_universe.bat')
+  'universe' = @('record_universe.py', 'run_recorder_universe.bat')
 }
 
 $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
