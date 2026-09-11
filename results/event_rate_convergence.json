@@ -1,0 +1,387 @@
+{
+  "windows": [
+    1440,
+    2880,
+    4320
+  ],
+  "pairs": {
+    "NBIS:sell": {
+      "full_band": 25.962,
+      "full_ev_per_day": 0.167,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 4.808
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 1.0
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.9928,
+          "med_err_own_band": 1.0
+        }
+      }
+    },
+    "NBIS:buy": {
+      "full_band": 9.25,
+      "full_ev_per_day": 4.762,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 0.261,
+          "med_err_own_band": 4.8567
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.1614,
+          "med_err_own_band": 5.9185
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.1773,
+          "med_err_own_band": 1.0083
+        }
+      }
+    },
+    "ANTH:sell": {
+      "full_band": 458.806,
+      "full_ev_per_day": 0.084,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 1.0
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 4.9771
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 2.9857
+        }
+      }
+    },
+    "ANTH:buy": {
+      "full_band": 1.05,
+      "full_ev_per_day": 59.144,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 0.9158,
+          "med_err_own_band": 0.9492
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.9409,
+          "med_err_own_band": 0.9662
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.9606,
+          "med_err_own_band": 0.9775
+        }
+      }
+    },
+    "HYPE:sell": {
+      "full_band": 8.909,
+      "full_ev_per_day": 0.502,
+      "w": {
+        "1440": {
+          "n_blocks": 9,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 0.9917
+        },
+        "2880": {
+          "n_blocks": 4,
+          "med_err_fixed_band": 0.9941,
+          "med_err_own_band": 1.4697
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.3235,
+          "med_err_own_band": 1.0
+        }
+      }
+    },
+    "HYPE:buy": {
+      "full_band": 4.891,
+      "full_ev_per_day": 3.618,
+      "w": {
+        "1440": {
+          "n_blocks": 9,
+          "med_err_fixed_band": 0.3802,
+          "med_err_own_band": 0.7664
+        },
+        "2880": {
+          "n_blocks": 4,
+          "med_err_fixed_band": 0.2466,
+          "med_err_own_band": 3.9731
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.011,
+          "med_err_own_band": 1.096
+        }
+      }
+    },
+    "ZEC:sell": {
+      "full_band": 11.124,
+      "full_ev_per_day": 0.334,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 1.9948
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.4969,
+          "med_err_own_band": 1.0
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.0036,
+          "med_err_own_band": 1.0
+        }
+      }
+    },
+    "ZEC:buy": {
+      "full_band": 9.329,
+      "full_ev_per_day": 1.002,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 0.0059,
+          "med_err_own_band": 1.0
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.0042,
+          "med_err_own_band": 1.4896
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.3353,
+          "med_err_own_band": 3.9821
+        }
+      }
+    },
+    "NEAR:sell": {
+      "full_band": 10.85,
+      "full_ev_per_day": 0.167,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 4.9771
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 1.0,
+          "med_err_own_band": 1.9447
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.9942,
+          "med_err_own_band": 1.0
+        }
+      }
+    },
+    "NEAR:buy": {
+      "full_band": 3.382,
+      "full_ev_per_day": 32.329,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 0.319,
+          "med_err_own_band": 0.7647
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.2201,
+          "med_err_own_band": 1.0268
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.0287,
+          "med_err_own_band": 0.4635
+        }
+      }
+    },
+    "BTC:buy": {
+      "full_band": 2.092,
+      "full_ev_per_day": 12.113,
+      "w": {
+        "1440": {
+          "n_blocks": 11,
+          "med_err_fixed_band": 0.4217,
+          "med_err_own_band": 0.7907
+        },
+        "2880": {
+          "n_blocks": 5,
+          "med_err_fixed_band": 0.3186,
+          "med_err_own_band": 0.8761
+        },
+        "4320": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.2094,
+          "med_err_own_band": 0.4777
+        }
+      }
+    },
+    "GOLD_LL:buy": {
+      "full_band": 1.0,
+      "full_ev_per_day": 18.027,
+      "w": {
+        "1440": {
+          "n_blocks": 7,
+          "med_err_fixed_band": 0.3362,
+          "med_err_own_band": 0.3362
+        },
+        "2880": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.2516,
+          "med_err_own_band": 0.2516
+        },
+        "4320": {
+          "n_blocks": 2,
+          "med_err_fixed_band": 0.1487,
+          "med_err_own_band": 0.1487
+        }
+      }
+    },
+    "NVDA_LL:sell": {
+      "full_band": 1.025,
+      "full_ev_per_day": 50.019,
+      "w": {
+        "1440": {
+          "n_blocks": 7,
+          "med_err_fixed_band": 0.2828,
+          "med_err_own_band": 0.3798
+        },
+        "2880": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.17,
+          "med_err_own_band": 0.1809
+        },
+        "4320": {
+          "n_blocks": 2,
+          "med_err_fixed_band": 0.1342,
+          "med_err_own_band": 0.3576
+        }
+      }
+    },
+    "NVDA_LL:buy": {
+      "full_band": 2.909,
+      "full_ev_per_day": 2.285,
+      "w": {
+        "1440": {
+          "n_blocks": 7,
+          "med_err_fixed_band": 0.3138,
+          "med_err_own_band": 7.3205
+        },
+        "2880": {
+          "n_blocks": 3,
+          "med_err_fixed_band": 0.3133,
+          "med_err_own_band": 7.3003
+        },
+        "4320": {
+          "n_blocks": 2,
+          "med_err_fixed_band": 0.3121,
+          "med_err_own_band": 9.776
+        }
+      }
+    }
+  },
+  "pooled": {
+    "1440": {
+      "med_a": 0.401,
+      "med_b": 0.9959,
+      "n_under_20pct_b": 0,
+      "n": 14
+    },
+    "2880": {
+      "med_a": 0.316,
+      "med_b": 1.2483,
+      "n_under_20pct_b": 1,
+      "n": 14
+    },
+    "4320": {
+      "med_a": 0.2607,
+      "med_b": 1.0,
+      "n_under_20pct_b": 1,
+      "n": 14
+    }
+  },
+  "need_events": 25,
+  "need_days_floor": {
+    "ANTH:buy": 0.4,
+    "NVDA_LL:sell": 0.5,
+    "NEAR:buy": 0.8,
+    "GOLD_LL:buy": 1.4,
+    "BTC:buy": 2.1,
+    "NBIS:buy": 5.2,
+    "HYPE:buy": 6.9,
+    "NVDA_LL:buy": 10.9,
+    "ZEC:buy": 25.0,
+    "HYPE:sell": 49.8,
+    "ZEC:sell": 74.9,
+    "NBIS:sell": 149.7,
+    "NEAR:sell": 149.7,
+    "ANTH:sell": 297.6
+  },
+  "band_vs_rate_spearman": -0.895,
+  "band_x_rate_top": [
+    [
+      "NEAR:buy",
+      109.3
+    ],
+    [
+      "NBIS:buy",
+      44.0
+    ],
+    [
+      "ANTH:sell",
+      38.5
+    ],
+    [
+      "BTC:buy",
+      25.3
+    ],
+    [
+      "HYPE:buy",
+      17.7
+    ],
+    [
+      "ZEC:buy",
+      9.3
+    ],
+    [
+      "NVDA_LL:buy",
+      6.6
+    ],
+    [
+      "HYPE:sell",
+      4.5
+    ],
+    [
+      "NBIS:sell",
+      4.3
+    ],
+    [
+      "ZEC:sell",
+      3.7
+    ],
+    [
+      "NEAR:sell",
+      1.8
+    ]
+  ]
+}
