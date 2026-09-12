@@ -131,6 +131,9 @@ LIGHTER_HOSTS = {
     "mainnet": "https://mainnet.zklighter.elliot.ai",
     "robinhood": "https://api.rh.lighter.xyz",
 }
+# chain_id 與 entropy_arb/config.py 的 LIGHTER_PROFILES 同值（刻意重寫一次：
+# check_env 要能在 SDK 與 engine 都還沒裝好時獨立跑）。對不上就是這裡要改。
+LIGHTER_CHAIN_IDS = {"mainnet": 304, "robinhood": 466324}
 
 
 def check_lighter(env: dict, prefix: str, want: str, needed_by: str) -> None:
@@ -194,6 +197,39 @@ def check_lighter(env: dict, prefix: str, want: str, needed_by: str) -> None:
             f"index {idx} 不在 {want}，卻存在於 {other[0]} ★ 這一組放錯前綴了")
     else:
         say(BAD, label + " 帳號", f"index {idx} 在 {want} 上不存在")
+
+    # ── 簽章能力（2026-09-12 補）────────────────────────────────────────
+    # 上面幾關驗的是**形狀**與**帳戶存在**，不是「這把金鑰簽不簽得動」。
+    # 2026-09-12 它們全報 OK，而真的送單時 SignerClient 回
+    # 「private key does not match the one on Lighter ... on api key 4」。
+    # 一個不能下單的設定看起來是綠的 —— 這個 repo 反覆出現的同一個形狀。
+    # 所以這一關直接呼叫 SDK 自己的 check_client()，不自己判斷。
+    if status != "found" or not key or not kid:
+        return
+    try:
+        from lighter import SignerClient
+    except ImportError:
+        say(WARN, label + " 簽章",
+            "SDK 沒裝（pip install -r requirements-live.txt）—— "
+            "**簽章能力未驗，上面的 OK 不代表下得了單**")
+        return
+    base = LIGHTER_HOSTS[want]
+    chain = LIGHTER_CHAIN_IDS[want]
+    try:
+        signer = SignerClient(url=base, account_index=int(idx),
+                              api_private_keys={int(kid): key},
+                              chain_id=chain)
+        err = signer.check_client()
+    except Exception as e:                                      # noqa: BLE001
+        say(BAD, label + " 簽章", f"建不起 signer：{type(e).__name__}: {e}"[:150])
+        return
+    if err is None:
+        say(OK, label + " 簽章", f"api key {kid} 能簽（chain_id {chain}）")
+    else:
+        msg = str(err).replace(key, "<私鑰已遮蔽>")
+        say(BAD, label + " 簽章",
+            f"api key {kid} **簽不動** —— {msg[:120]}"
+            " ★ 去 Lighter 重新產生 API key，或改對 API_KEY_INDEX")
 
 
 def check_tg(env: dict) -> None:
