@@ -46,15 +46,32 @@ LOGS = ROOT / "engine" / "logs"
 
 
 def load_series(path: Path):
-    """回傳 (分鐘格點 ts, premium_close)，缺格為 NaN。"""
+    """回傳 (分鐘格點 ts, premium_close)，缺格為 NaN。
+
+    **輪替檔要一起讀。** 錄製器在 schema 改變時會把舊檔改名成
+    `minutes.csv.<時戳>.old` 並開新檔（見 `recorder._open`），所以只開
+    `minutes.csv` 會從輪替那一刻**從零重數** —— 那正是 mistake.md
+    2026-08-29 的病：一份資料兩個讀者只改了一個，而漏掉的那個不會報錯，
+    只會安靜地給出一個看起來合理的錯數字。
+
+    2026-09-12 枚舉全部讀取端時，**本支是唯一漏掉的**
+    （`premium_verdict.load` 與 `venue_toxicity` 都已經 glob 了）。
+    時戳是固定寬度，所以字典序＝時間序，舊檔排在現行檔之前。
+    """
+    import glob as _glob
+    paths = [Path(p) for p in sorted(_glob.glob(str(path) + "*.old"))]
+    paths.append(Path(path))
     ts, px = [], []
-    with io.open(path, encoding="utf-8", newline="") as fh:
-        for r in csv.DictReader(fh):
-            try:
-                ts.append(int(r["minute_ts"]) // 60 * 60)
-                px.append(float(r["premium_close_bps"]))
-            except (KeyError, TypeError, ValueError):
-                continue
+    for p in paths:
+        if not p.exists():
+            continue
+        with io.open(p, encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    ts.append(int(r["minute_ts"]) // 60 * 60)
+                    px.append(float(r["premium_close_bps"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
     if len(ts) < 60:
         return None, None
     t = np.asarray(ts, dtype=np.int64)
