@@ -55,12 +55,82 @@ VENUES: dict[str, dict] = {
              "note": "deployerFeeScale 1.0 + growth mode -> HL schedule."},
     "hyna": {"taker_bps": 4.5, "maker_bps": 1.5, "rebate": 0.0, "verified": True,
              "note": "deployerFeeScale 1.0 + growth mode -> HL schedule."},
-    "lighter": {"taker_bps": 0.0, "maker_bps": 0.0, "rebate": 0.0, "verified": True,
-                "note": "Lighter docs: standard account 0 maker / 0 taker. "
-                        "Structural, not a promotion."},
-    "lighter-rh": {"taker_bps": 0.0, "maker_bps": 0.0, "rebate": 0.0, "verified": True,
-                   "note": "Same schedule; quotes in USDG, so part of any "
-                           "premium is the stablecoin basis."},
+    # ------------------------------------------------------------------ Lighter
+    # 2026-09-12 CORRECTION. This entry said 0.0 / 0.0 "verified" from
+    # 2026-09-03 until today. IT WAS WRONG, and the docstring at the top of
+    # this file predicted exactly this failure ("a promotional zero is exactly
+    # the kind of number that expires quietly"). It was not a promotion that
+    # expired -- the account-tier layer was never checked at all.
+    #
+    # Lighter prices the ACCOUNT, not the market:
+    #
+    #   Standard   0 / 0 bps      cancel latency 300ms IMPOSED BY THE VENUE
+    #   Premium    0.40 / 2.80    no added latency on cancels or post-only
+    #              (that is the zero-staked-LIT row; staking 500k LIT takes it
+    #               to 0.28 / 1.96)
+    #   Plus       0.5 bps flat both sides, 300ms taker / 200ms cancel
+    #
+    # OUR ACCOUNT (index 743078) IS **PREMIUM**. Four independent sources agree:
+    # the PREMIUM badge on app.lighter.xyz/portfolio; the order panel on BTC
+    # with account data loaded; the same panel on LIT; and the Premium
+    # zero-stake row in docs.lighter.xyz/trading/trading-fees, which matches
+    # 0.028% / 0.004% to the digit.
+    #
+    # Two traps that each fooled a reading of this earlier today:
+    #   (a) /api/v1/orderBooks reports taker_fee == maker_fee == "0.0000" for
+    #       all 245 markets. That is the PROTOCOL-level market parameter, not
+    #       what the account pays. Do not read venue cost off that field.
+    #   (b) the order panel shows "0% | 0%" until the account data loads, so a
+    #       rate-limited or logged-out page looks like a zero-fee venue.
+    #
+    # The tier is switchable (changeAccountTier; once per 24h, only with no
+    # open orders or positions). Switching to Standard makes these numbers 0/0
+    # and buys a 300ms cancel latency instead -- see TODO 1.31 for the open
+    # question of what that latency is worth in bps. Until that is measured
+    # and a switch is actually made, the line below is what we pay.
+    "lighter": {"taker_bps": 2.80, "maker_bps": 0.40, "rebate": 0.0,
+                "verified": True,
+                "note": "PREMIUM tier, zero staked LIT (docs 2026-09-12 + "
+                        "PREMIUM badge on our portfolio page + order panel on "
+                        "BTC and LIT). Standard tier would be 0/0 but adds a "
+                        "venue-imposed 300ms cancel latency. NOT a per-market "
+                        "fee -- /api/v1/orderBooks' 0.0000 is the protocol "
+                        "parameter, not the account's cost."},
+    "lighter-rh": {"taker_bps": 2.80, "maker_bps": 0.40, "rebate": 0.0,
+                   "verified": False,
+                   "note": "ASSUMED = same schedule as mainnet Lighter. The "
+                           "tier is per ACCOUNT and we hold no Robinhood-side "
+                           "account, so this has never been checked -- the "
+                           "Premium numbers are used because erring high is "
+                           "the safe direction for a gate. Quotes in USDG, so "
+                           "part of any premium is the stablecoin basis."},
+    # ---------------------------------------------------------- Lighter, STANDARD
+    # 2026-09-13, RECEIPT-VERIFIED from the public trade tape: Lighter encodes a
+    # zero fee as an ABSENT field, not as 0. Across 53,784 regular fills the
+    # accounts partition almost perfectly -- takers: 905 always carry the field,
+    # 638 never do, only 2 mixed; makers: 268 / 96 / 0 mixed -- and no fill in
+    # the "carries the field" group is ever 0.000 (0.50 Plus and the 1.96-2.80
+    # Premium ladder are all present). So absent == Standard == 0/0, and it is
+    # not theoretical: **74.9% of taker notional and 11.4% of maker notional
+    # pays nothing.**
+    #
+    # The tier is an ACCOUNT property, not a market one, and it is exclusive:
+    # Standard buys 0/0 at the price of a 300 ms venue-imposed cancel latency
+    # and ~60 req/min. That makes it unusable for market making and irrelevant
+    # to anything that rebalances hourly. Which tier applies is therefore a
+    # STRATEGY decision -- see cost_model's --lighter-tier.
+    "lighter-std": {"taker_bps": 0.0, "maker_bps": 0.0, "rebate": 0.0,
+                    "verified": True,
+                    "note": "Lighter STANDARD tier: 0 maker / 0 taker, "
+                            "receipt-verified from the tape (74.9% of taker "
+                            "notional pays nothing). Costs 300ms cancel "
+                            "latency + ~60 req/min -- fine for slow "
+                            "strategies, impossible for market making."},
+    "lighter-rh-std": {"taker_bps": 0.0, "maker_bps": 0.0, "rebate": 0.0,
+                       "verified": False,
+                       "note": "ASSUMED same tier structure as mainnet "
+                               "Lighter. We hold no Robinhood-chain account, "
+                               "so this has never been checked."},
     "bitget": {
         "taker_bps": 6.0, "maker_bps": 2.0, "rebate": 0.50, "verified": True,
         "note": "Bitget publishes takerFeeRate per contract (0.0006 = 6 bps). "

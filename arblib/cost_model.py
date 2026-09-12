@@ -60,6 +60,22 @@ except Exception:
 ROOT = HERE.parent
 OUT = ROOT / "results" / "arb_cost_model.json"
 
+# 2026-09-13：Lighter 的費率等級是**帳戶屬性**，而它是排他的
+# （Standard 0/0 但 300ms 取消延遲＋約 60 req/min；Premium 反之）。
+# 所以「哪一級」是策略決定不是市場事實 -> 用旗標選，並印在標題上。
+# **只在費率那一次呼叫裡映射，不要改場館鍵本身** —— 第 3 項用
+# `ASSUMED["margin_frac"][leg]` 查保證金，改名會查不到而落到預設 0.2，
+# 於是「換費率等級」會悄悄改掉資金成本。
+LIGHTER_TIER = "premium"
+_STD = {"lighter": "lighter-std", "lighter-rh": "lighter-rh-std"}
+
+
+def fee_key(venue: str) -> str:
+    """費率查表用的鍵（可能因等級而異）。其餘一律用原始場館鍵。"""
+    if LIGHTER_TIER == "standard":
+        return _STD.get(venue, venue)
+    return venue
+
 # ── assumptions, each named so they can be replaced one at a time ──────────
 ASSUMED = {
     # 3 capital
@@ -140,9 +156,11 @@ def cost_breakdown(t: TradeSpec) -> dict:
     out, tags = {}, {}
 
     # 1 explicit fees (both legs, in and out) — fees.py is the owner
-    out["1_fees"] = FEES.round_trip_bps(a, b, t.mode, t.rebate)
-    tags["1_fees"] = ("VERIFIED" if not FEES.unverified(a, b)
-                      else f"unverified legs: {FEES.unverified(a, b)}")
+    fa, fb = fee_key(a), fee_key(b)
+    out["1_fees"] = FEES.round_trip_bps(fa, fb, t.mode, t.rebate)
+    tags["1_fees"] = (("VERIFIED" if not FEES.unverified(fa, fb)
+                       else f"unverified legs: {FEES.unverified(fa, fb)}")
+                      + f" | lighter tier={LIGHTER_TIER}")
 
     # 2 slippage, both legs, in and out (4 crossings in taker mode; the
     # resting leg pays none if it fills at its price)
@@ -192,6 +210,22 @@ def cost_breakdown(t: TradeSpec) -> dict:
         out["7_tail"] = None
         tags["7_tail"] = (f"n/a per trade ({t.trades_per_year:.1f} trades/yr); "
                           f"{drag_pa*locked*1e4:.0f} bps/yr of capital, ASSUMED")
+
+    # 8 incomplete spread: the resting leg fills, the hedge price is gone.
+    # THE dominant cost of maker/taker per the source article ("incomplete
+    # resolution is one area you'll spend time working on"), and we have never
+    # measured it. Reported as None rather than 0.0 ON PURPOSE: a 0.0 here is
+    # indistinguishable from "this cost does not exist", which is exactly the
+    # failure mode mistake.md 2026-09-09 records (a field whose default equals
+    # the result of never being written).
+    if t.mode in ("maker_taker", "maker_maker"):
+        out["8_incomplete"] = None
+        tags["8_incomplete"] = (
+            "**UNMEASURED and NOT in the total.** Resting leg fills, hedge is "
+            "gone -> one naked leg: exit at a loss or pay more than planned. "
+            "Needs P(hedge still there | our fill) x the give-up, per pair. "
+            "Source: small-trader-alpha-6 (2024-07-09) names this the main "
+            "work of maker/taker execution.")
 
     total = sum(v for v in out.values() if v is not None)
     gross = t.band_bps / 2.0                                    # capture half the band
@@ -297,14 +331,27 @@ def main() -> int:
     ap.add_argument("--size", type=float, default=200.0, help="order notional per leg, USD")
     ap.add_argument("--mode", default="taker_taker", choices=list(FEES.MODES))
     ap.add_argument("--no-rebate", action="store_true")
+    ap.add_argument("--lighter-tier", default="premium",
+                    choices=("premium", "standard"),
+                    help="Lighter 腿用哪個費率等級（帳戶屬性，排他）")
     a = ap.parse_args()
+    global LIGHTER_TIER
+    LIGHTER_TIER = a.lighter_tier
     print("=" * 100)
-    print(f"  §1.06 成本函數——七個桶，每筆來回 bps｜size ${a.size:,.0f}/腿｜{FEES.MODES[a.mode]}"
-          f"｜{'不含' if a.no_rebate else '含'}返佣")
+    print(f"  §1.06 成本函數——每筆來回 bps｜size ${a.size:,.0f}/腿｜{FEES.MODES[a.mode]}"
+          f"｜{'不含' if a.no_rebate else '含'}返佣"
+          f"｜**Lighter 腿＝{a.lighter_tier.upper()}**")
+    if a.lighter_tier == "standard":
+        print("  （Standard＝0/0，收據查證：74.9% 的吃單成交額走這一級。"
+              "代價是 300ms 取消延遲＋約 60 req/min -> 做市不可用、慢策略無感）")
+    if a.mode in ("maker_taker", "maker_maker"):
+        print("  （**第 8 項 incomplete spread 未量、未計入合計** —— "
+              "作者說那是 maker/taker 的頭號工作，見 tags）")
     print("=" * 100)
     print(f"  {'配對':<8}{'帶':>6}{'毛':>6} | {'1費':>6}{'2滑':>6}{'3資':>6}{'4持':>6}{'5轉':>6}{'6營':>6}{'7尾':>6} | "
           f"{'合計':>7}{'淨':>7}{'只扣費':>7}{'量到%':>6}")
     res = {"size_usd": a.size, "mode": a.mode, "rebate": not a.no_rebate,
+           "lighter_tier": a.lighter_tier,
            "assumptions": {k: (v if not isinstance(v, dict) else {kk: vv for kk, vv in v.items()})
                            for k, v in ASSUMED.items()}, "pairs": {}}
     for t in family_specs(a.size, a.mode):
@@ -318,10 +365,10 @@ def main() -> int:
               f"{r['measured_share']*100:>5.0f}%" + ("  (尾未攤)" if r["tail_excluded"] else ""))
         res["pairs"][t.pid] = {"spec": {k: v for k, v in t.__dict__.items() if k != "notes"},
                                **r}
-    print("\n  讀法：毛＝帶÷2（進場在帶、回到半帶平倉）。「淨」扣七桶、「只扣費」只扣第 1 桶——"
+    print("\n  讀法：毛＝帶÷2（進場在帶、回到半帶平倉）。「淨」扣七個成本項、「只扣費」只扣第 1 項——"
           "兩者的差就是 fees.py 以前看不見的成本。")
-    print("  量到%＝七桶裡有幾桶是量測值；其餘是刻意偏悲觀的假設，換一個真數字就少一個假設。")
-    print("  第 2 桶 inf ＝這個 size 超過 3 bps 內的深度，整個帶都會被吃掉——先縮 size 再談別的。")
+    print("  量到%＝七個成本項裡有幾項是量測值；其餘是刻意偏悲觀的假設，換一個真數字就少一個假設。")
+    print("  第 2 項 inf ＝這個 size 超過 3 bps 內的深度，整個帶都會被吃掉——先縮 size 再談別的。")
     OUT.write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     print(f"\n  -> {OUT}")
     return 0
