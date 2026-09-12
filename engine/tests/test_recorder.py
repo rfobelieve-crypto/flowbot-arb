@@ -55,6 +55,46 @@ def test_minute_aggregation_and_rollover():
     assert float(m2["hedge_ask"]) == 100.01
 
 
+def test_depth_columns_land_and_only_count_levels_inside_the_band():
+    """The depth columns must actually reach the CSV, with the right levels.
+
+    Judged on the ARTEFACT (what the file contains), not on "the code has a
+    line that writes it" -- the whole point of adding these columns is that
+    for months we had the full book in memory and were writing only its
+    first level, and nothing anywhere went red about it.
+
+    Reverse proof is built in: the 60 bps level must be absent from d5 and
+    d25 and present in d100. If the band filter were dropped, all three
+    columns would be equal and this test fails.
+    """
+    e_book, h_book = OrderBook(), OrderBook()
+    path = os.path.join(tempfile.mkdtemp(), "minutes.csv")
+    rec = MinuteRecorder(path, e_book, h_book, staleness_sec=1e9)
+
+    # entropy mid = 100.00; bids at 0, 20 and 60 bps below it.
+    e_book.apply_hl([[{"px": "100.00", "sz": "1"},     # 0 bps   -> $100
+                      {"px": "99.80", "sz": "1"},      # 20 bps  -> $99.80
+                      {"px": "99.40", "sz": "1"}],     # 60 bps  -> $99.40
+                     [{"px": "100.00", "sz": "1"}]])
+    set_book(h_book, 99.99, 100.01)
+    rec.sample(1_700_000_000.0)
+    rec.close()
+
+    with open(path, newline="") as fh:
+        row = list(csv.DictReader(fh))[0]
+    d5, d25, d100 = (float(row["e_bid_d5"]), float(row["e_bid_d25"]),
+                     float(row["e_bid_d100"]))
+    assert abs(d5 - 100.00) < 0.01            # touch only
+    assert abs(d25 - 199.80) < 0.01           # touch + the 20 bps level
+    assert abs(d100 - 299.20) < 0.01          # all three
+    assert d5 < d25 < d100                    # bands must be nested, not equal
+    # the other nine columns exist and are numbers (a missing one would
+    # KeyError here, which is the point)
+    for side in ("e_ask", "h_bid", "h_ask"):
+        for b in (5, 25, 100):
+            float(row[f"{side}_d{b}"])
+
+
 def test_stale_books_are_skipped():
     e_book, h_book = OrderBook(), OrderBook()
     path = os.path.join(tempfile.mkdtemp(), "minutes.csv")
