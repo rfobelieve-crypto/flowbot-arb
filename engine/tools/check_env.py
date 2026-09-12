@@ -204,7 +204,10 @@ def check_lighter(env: dict, prefix: str, want: str, needed_by: str) -> None:
     # 「private key does not match the one on Lighter ... on api key 4」。
     # 一個不能下單的設定看起來是綠的 —— 這個 repo 反覆出現的同一個形狀。
     # 所以這一關直接呼叫 SDK 自己的 check_client()，不自己判斷。
-    if status != "found" or not key or not kid:
+    # **不要**掛在 status == "found" 上：帳戶查詢是網路請求，會暫時失敗
+    # （2026-09-12 就被一個自己造成的 HTTP 405 限流跳過了整關）。簽章檢查
+    # 用的是本地金鑰與 SDK 自己的 check_client()，與那個查詢無關。
+    if not key or not kid:
         return
     try:
         from lighter import SignerClient
