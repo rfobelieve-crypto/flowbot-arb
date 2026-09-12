@@ -236,17 +236,28 @@ class MinuteRecorder:
         if d:
             os.makedirs(d, exist_ok=True)
         if os.path.exists(self.path) and os.path.getsize(self.path) > 0:
-            # never append rows under a different schema's header
+            # never append rows under a different schema's header.
+            #
+            # Read the header and CLOSE the file before renaming. The rename
+            # used to sit inside the `with open(...)` block, which works on
+            # Linux (rename over an open fd is fine) and **can never work on
+            # Windows**: Python opens without FILE_SHARE_DELETE, so a file
+            # this process holds open cannot be renamed by this process.
+            # Found 2026-09-12 by the depth-column schema change: every
+            # recorder logged "rotated to ..." and then died on
+            # PermissionError [WinError 32] once a minute, writing nothing.
+            # The log line claimed a rotation that had not happened.
             with open(self.path, encoding="utf-8") as fh0:
-                if fh0.readline().strip() != ",".join(HEADER):
-                    # Timestamped so a SECOND schema change cannot overwrite
-                    # the first rotation's file (the 2026-08-28 upgrade left
-                    # 257 minutes in minutes.csv.old; os.replace would have
-                    # eaten them). Readers glob "<path>*.old".
-                    dst = f"{self.path}.{time.strftime('%Y%m%d%H%M')}.old"
-                    log.warning("%s has an old header — rotated to %s",
-                                self.path, dst)
-                    os.replace(self.path, dst)
+                head = fh0.readline().strip()
+            if head != ",".join(HEADER):
+                # Timestamped so a SECOND schema change cannot overwrite
+                # the first rotation's file (the 2026-08-28 upgrade left
+                # 257 minutes in minutes.csv.old; os.replace would have
+                # eaten them). Readers glob "<path>*.old".
+                dst = f"{self.path}.{time.strftime('%Y%m%d%H%M')}.old"
+                os.replace(self.path, dst)
+                log.warning("%s had an old header — rotated to %s",
+                            self.path, dst)
         new = not os.path.exists(self.path) or os.path.getsize(self.path) == 0
         self._fh = open(self.path, "a", newline="", encoding="utf-8")
         self._writer = csv.writer(self._fh)
