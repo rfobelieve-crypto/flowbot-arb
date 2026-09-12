@@ -95,6 +95,47 @@ def test_depth_columns_land_and_only_count_levels_inside_the_band():
             float(row[f"{side}_d{b}"])
 
 
+def test_traded_volume_splits_by_side_and_by_offset():
+    """成交量必須分方向、分距離落進正確的欄位。
+
+    這一關的重點是**方向不可以被合池**：#1 的容量算法第一步就是拆買賣兩側
+    （「常常 80% 的量在同一個方向，那正是套利的成因」），合起來那件事就
+    看不到了。方向搞反不會報錯，只會讓「誰在買」整個顛倒。
+
+    順便釘住 offset 的分桶與清算欄。
+    """
+    e_book, h_book = OrderBook(), OrderBook()
+    path = os.path.join(tempfile.mkdtemp(), "minutes.csv")
+    rec = MinuteRecorder(path, e_book, h_book, staleness_sec=1e9)
+
+    set_book(e_book, 99.99, 100.01)          # entropy mid = 100.00
+    set_book(h_book, 99.99, 100.01)
+    # 吃單方買 $300 @ 100.01（離 mid 1 bps）、吃單方賣 $100 @ 99.50（50 bps）
+    e_book.on_trade(True, 100.01, 300.0)
+    e_book.on_trade(False, 99.50, 100.0)
+    # hedge 側一筆清算買單 $250 @ 100.00（0 bps）
+    h_book.on_trade(True, 100.00, 250.0, True)
+    rec.sample(1_700_000_000.0)
+    rec.close()
+
+    with open(path, newline="") as fh:
+        row = list(csv.DictReader(fh))[0]
+    assert float(row["e_buy_usd"]) == 300.0      # 方向沒有被合池
+    assert float(row["e_sell_usd"]) == 100.0
+    assert int(row["e_ntrd"]) == 2
+    assert float(row["e_liq_usd"]) == 0.0
+    # offset：1 bps 那筆進全部三桶；50 bps 那筆只進 100 bps 桶
+    assert float(row["e_voff5"]) == 300.0
+    assert float(row["e_voff25"]) == 300.0
+    assert float(row["e_voff100"]) == 400.0
+    assert float(row["h_buy_usd"]) == 250.0
+    assert float(row["h_liq_usd"]) == 250.0      # 清算另外記
+    assert int(row["h_ntrd"]) == 1
+
+    # 排空之後不可以被算第二次（tape 累積在 book 上，沒排空會溢到下一分鐘）
+    assert e_book.tape.n == 0 and h_book.tape.n == 0
+
+
 def test_schema_rotation_actually_renames_and_keeps_the_old_rows():
     """舊 schema 的檔必須**真的**被改名，而且舊資料留著。
 

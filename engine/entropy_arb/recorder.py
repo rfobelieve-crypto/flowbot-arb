@@ -78,13 +78,38 @@ HEADER = ["minute_ts", "time_utc",
           # Bands are 5/25/100 bps because this family's own bands span two
           # orders of magnitude (NBIS ~26 bps, ANTH ~464): a single band
           # would be too tight for some pairs and meaningless for others.
-          # These are ORDER BOOK sizes, not traded volume -- traded volume
-          # is a separate gap (flow_system TODO 1.22) that needs a trades
-          # subscription neither feed currently makes.
+          # These are ORDER BOOK sizes (what is RESTING), not traded volume.
+          # Traded volume is the block below, added the same day.
           "e_bid_d5", "e_bid_d25", "e_bid_d100",
           "e_ask_d5", "e_ask_d25", "e_ask_d100",
           "h_bid_d5", "h_bid_d25", "h_bid_d100",
-          "h_ask_d5", "h_ask_d25", "h_ask_d100"]
+          "h_ask_d5", "h_ask_d25", "h_ask_d100",
+          # 2026-09-12: TRADED volume, per side. The depth columns above say
+          # what is RESTING; these say what actually went through. §1.20's
+          # capacity model multiplies band x events x resting-top-of-book,
+          # while Small Trader Alpha #1 sizes capacity off the FLOW over a
+          # chosen window ("every 20s, $3,000 for hours") and assumes you can
+          # take about half of it. Those differ by orders of magnitude, and
+          # the arb holding period is minutes-to-hours, so flow is the right
+          # quantity. Neither feed subscribed to trades until today.
+          #
+          # buy/sell split because #1's first step is exactly that: "it isn't
+          # always 50/50, we can often see 80% of the volume in one direction,
+          # hence causing the arbitrage" -- pooled, that fact is invisible.
+          # off5/25/100 = traded notional within N bps of that venue's mid at
+          # trade time (#2 calls this offset "a metric we will use heavily in
+          # our optimization process"; it is the same quantity as the delta
+          # sweep in flow_system TODO 1.27).
+          # liq = liquidation volume. #2 classifies WHY a mispricing exists
+          # (idiots / risk premium / too-illiquid) and liquidations are the
+          # cleanest proxy for the first. Lighter ships them in a separate
+          # `liquidation_trades` array; **HL does not, so h_/e_liq_usd is 0 on
+          # the HL leg by construction -- that is "this venue does not say",
+          # not "no liquidations happened".**
+          "e_buy_usd", "e_sell_usd", "e_ntrd", "e_liq_usd",
+          "e_voff5", "e_voff25", "e_voff100",
+          "h_buy_usd", "h_sell_usd", "h_ntrd", "h_liq_usd",
+          "h_voff5", "h_voff25", "h_voff100"]
 
 DEPTH_BPS = (5.0, 25.0, 100.0)
 
@@ -127,7 +152,7 @@ class _MinuteAgg:
                  "e_bid", "e_ask", "h_bid", "h_ask",
                  "e_bid_sz", "e_ask_sz", "h_bid_sz", "h_ask_sz",
                  "s_max_ntl", "s_max_age", "b_max_ntl", "b_max_age",
-                 "depth")
+                 "depth", "tape")
 
     def __init__(self, minute: int) -> None:
         self.minute = minute
@@ -146,6 +171,9 @@ class _MinuteAgg:
         # 跟其他 *_sz 一樣取「這一分鐘最後一筆新鮮樣本」,不取平均 ——
         # 平均會把一次短暫的厚牆抹掉,而我們要問的正是「那一刻有沒有量」。
         self.depth = [0.0] * 12
+        # 成交是**累加**不是取收盤:一分鐘內流過多少就是多少。
+        # (e_buy, e_sell, e_n, e_liq, e_off5, e_off25, e_off100, h_...) 共 14
+        self.tape = [0.0] * 14
 
     def add(self, e_bid: float, e_ask: float, h_bid: float, h_ask: float,
             e_bid_sz: float = 0.0, e_ask_sz: float = 0.0,
@@ -202,6 +230,18 @@ class _MinuteAgg:
                 f"{self.h_bid_sz:.6g}", f"{self.h_ask_sz:.6g}",
                 f"{self.s_max_ntl:.2f}", f"{self.s_max_age:.1f}",
                 f"{self.b_max_ntl:.2f}", f"{self.b_max_age:.1f}"]
+
+    def add_tape(self, e: tuple, h: tuple) -> None:
+        """把兩個場館這一秒排空的成交加進本分鐘。"""
+        for i, v in enumerate(tuple(e) + tuple(h)):
+            self.tape[i] += v
+
+    def tape_row(self) -> list:
+        out = []
+        for i, v in enumerate(self.tape):
+            # 第 3 與第 10 格是筆數,印整數
+            out.append("%d" % int(v) if i in (2, 9) else "%.2f" % v)
+        return out
 
     def depth_row(self) -> list:
         """深度那 12 欄**單獨出**，因為它們在 HEADER 裡排在資金費**之後**。
@@ -286,7 +326,8 @@ class MinuteRecorder:
             except Exception:
                 pass                      # never lose a minute over funding
         # 順序必須跟 HEADER 一致：… 資金費 4 欄，然後深度 12 欄。
-        self._writer.writerow(row + [fe, fh, fd, fa] + self._agg.depth_row())
+        self._writer.writerow(row + [fe, fh, fd, fa]
+                              + self._agg.depth_row() + self._agg.tape_row())
         self._fh.flush()
         self.rows_written += 1
         self._agg = None
@@ -315,6 +356,10 @@ class MinuteRecorder:
                  + depth_usd(eb.asks, e_mid, False)
                  + depth_usd(hb.bids, h_mid, True)
                  + depth_usd(hb.asks, h_mid, False))
+        # 成交要**每秒排空**:tape 累積在 book 上,不排空就會被算進下一分鐘。
+        # 放在 agg 建好之後,所以書不新鮮那幾秒的成交會被丟掉 —— 那是誠實的,
+        # 因為那幾分鐘本來就不會有列。
+        self._agg.add_tape(eb.tape.drain(), hb.tape.drain())
         self._agg.add(
             e_bid, e_ask, h_bid, h_ask,
             eb.bids.get(e_bid, 0.0), eb.asks.get(e_ask, 0.0),

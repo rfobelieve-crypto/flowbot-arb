@@ -15,6 +15,68 @@ from typing import Dict, List, Optional, Tuple
 Level = Tuple[float, float]
 
 
+TAPE_BPS = (5.0, 25.0, 100.0)
+
+
+class Tape:
+    """這一分鐘流過這個場館的成交，按方向與離中價的距離分開累加。
+
+    為什麼要這個（2026-09-12）：§1.20 的容量模型是
+    `帶寬 × 事件數 × 對手頂檔深度`，而頂檔深度是**某一瞬間**的一個價位。
+    Small Trader Alpha #1 的容量算法完全不同 —— 它數的是
+    **一段時間流過來多少量**（他的例子：每 20 秒 $3,000 連續數小時），
+    再假設吃得到其中一半。兩者差好幾個數量級，而套利的持有期本來就是
+    分鐘到小時，所以流量才是對的那個量。
+
+    三件事一起記，因為它們回答三個不同的問題：
+      buy/sell    **分方向**。#1 的第一步就是拆兩側 ——「常常 80% 的量在
+                  同一個方向，那正是套利的成因」。合起來就看不到那件事。
+      off5/25/100 成交**離中價多遠**。#2 把 offset 稱為「最佳化過程中我們
+                  會大量使用的指標」；它跟 §1.27 的 δ 掃描是同一個量。
+      liq         **強制平倉**的量。#2 把機會成因分成「有人亂倒／風險溢價／
+                  太冷門」，而清算是「有人亂倒」最乾淨的代理。Lighter 的 WS
+                  把它放在獨立的 `liquidation_trades` 陣列，等於免費送分類。
+
+    掛在 OrderBook 上（而不是把 callback 傳進 feed）是為了不動 venue_* 與
+    engine.py —— feed 本來就持有 book，recorder 也是。
+    """
+
+    __slots__ = ("buy_usd", "sell_usd", "n", "liq_usd", "off")
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.buy_usd = 0.0
+        self.sell_usd = 0.0
+        self.n = 0
+        self.liq_usd = 0.0
+        self.off = [0.0] * len(TAPE_BPS)
+
+    def add(self, is_buy: bool, px: float, usd: float, mid: float,
+            is_liq: bool = False) -> None:
+        """`is_buy` = **吃單方**是買（Lighter 看 is_maker_ask、HL 看 side）。"""
+        if not (usd > 0):
+            return
+        self.n += 1
+        if is_buy:
+            self.buy_usd += usd
+        else:
+            self.sell_usd += usd
+        if is_liq:
+            self.liq_usd += usd
+        if mid > 0 and px > 0:
+            o = abs(px - mid) / mid * 1e4
+            for i, b in enumerate(TAPE_BPS):
+                if o <= b:
+                    self.off[i] += usd
+
+    def drain(self) -> tuple:
+        out = (self.buy_usd, self.sell_usd, self.n, self.liq_usd, *self.off)
+        self.reset()
+        return out
+
+
 class OrderBook:
     def __init__(self) -> None:
         self.bids: Dict[float, float] = {}
@@ -22,9 +84,25 @@ class OrderBook:
         self.ready = False
         self.last_update_ts = 0.0
         self.alive_ts = 0.0
+        self.tape = Tape()
 
     def touch(self) -> None:
         self.alive_ts = time.time()
+
+    def on_trade(self, is_buy: bool, px: float, usd: float,
+                 is_liq: bool = False) -> None:
+        """feed 收到一筆成交時呼叫。
+
+        **不可以 raise，也不可以呼叫 notify()** —— 前者會殺掉 ws 迴圈，
+        後者會讓每一筆成交都喚醒策略迴圈，而 feeds.py 的檔頭已經記過：
+        那正是 max_queue 塞爆、伺服器把我們踢掉的來源。
+        """
+        try:
+            b, a = self.best_bid(), self.best_ask()
+            mid = (b + a) / 2.0 if (b and a) else 0.0
+            self.tape.add(is_buy, px, usd, mid, is_liq)
+        except Exception:                    # noqa: BLE001
+            pass
 
     def clear(self) -> None:
         self.bids.clear()

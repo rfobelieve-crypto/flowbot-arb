@@ -78,10 +78,38 @@ class LighterBookFeed:
         self.notify = notify
         self._nonce: Optional[int] = None
         self._synced = False
+        self._taped = False
 
     async def _subscribe(self, ws) -> None:
         await ws.send(json.dumps({"type": "subscribe",
                                   "channel": f"order_book/{self.market_id}"}))
+        # 成交掛在**同一條連線**上：不新增連線、不動重連邏輯。
+        # 頻道名是實測出來的（2026-09-12，公開端點探測，帶 order_book 對照組）
+        # —— 前三次探測分別被 HTTP 429、「沒等 connected 就訂閱」、
+        # 以及「把 chain_id 當成 market_id」擋下來，三次都是對照組抓到的。
+        await ws.send(json.dumps({"type": "subscribe",
+                                  "channel": f"trade/{self.market_id}"}))
+
+    def _handle_trades(self, msg: dict) -> None:
+        """`trades` 與 `liquidation_trades` 兩個陣列，欄位同形。
+
+        方向看 `is_maker_ask`：掛單方在賣 -> **吃單方是買**。
+        `usd_amount` 是交易所直接給的名目，不用自己乘（少一個單位錯的機會）。
+        這裡**不呼叫 notify()** —— 見 book.on_trade 的註解。
+        """
+        if _chan_id(msg.get("channel", "")) != self.market_id:
+            return
+        for key, is_liq in (("trades", False), ("liquidation_trades", True)):
+            for t in (msg.get(key) or []):
+                try:
+                    self.book.on_trade(bool(t.get("is_maker_ask")),
+                                       float(t["price"]),
+                                       float(t["usd_amount"]), is_liq)
+                except (KeyError, TypeError, ValueError):
+                    continue
+        if not self._taped and self.book.tape.n:
+            self._taped = True
+            log.info("[%s] trade tape live (first frame)", self.name)
 
     async def _handle_book(self, ws, msg: dict, snapshot: bool) -> None:
         if _chan_id(msg.get("channel", "")) != self.market_id:
@@ -134,6 +162,8 @@ class LighterBookFeed:
                             await self._handle_book(ws, msg, snapshot=False)
                         elif t == "subscribed/order_book":
                             await self._handle_book(ws, msg, snapshot=True)
+                        elif t in ("update/trade", "subscribed/trade"):
+                            self._handle_trades(msg)
                         elif t == "connected":
                             await self._subscribe(ws)
                         elif t == "ping":
@@ -165,9 +195,33 @@ class HLBookFeed:
         self.notify = notify
         self.ping_sec = ping_sec
         self._snapped = False
+        self._taped = False
+
+    def _on_trades(self, data) -> None:
+        """HL 的 `trades`：side 'B' = 吃單方買、'A' = 吃單方賣（與 hl_tape 一致）。
+
+        HL 沒有像 Lighter 那樣分出清算陣列，所以 liq 一律 False ——
+        那一欄在 HL 這側會是 0，**那是「這個場館沒給」不是「沒有清算」**。
+        不呼叫 notify()，見 book.on_trade。
+        """
+        for t in (data or []):
+            try:
+                if t.get("coin") != self.coin:
+                    continue
+                px = float(t["px"])
+                sz = float(t["sz"])
+                self.book.on_trade(str(t.get("side")) == "B", px, px * sz, False)
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not self._taped and self.book.tape.n:
+            self._taped = True
+            log.info("[%s] trade tape live (first frame)", self.name)
 
     def _on_frame(self, msg: dict) -> None:
         self.book.touch()
+        if msg.get("channel") == "trades":
+            self._on_trades(msg.get("data"))
+            return
         if msg.get("channel") == "l2Book":
             d = msg.get("data") or {}
             if d.get("coin") == self.coin:
@@ -200,10 +254,15 @@ class HLBookFeed:
                     log.info("[%s] connected (official ws, %s)", self.name, self.coin)
                     self.book.clear()
                     self._snapped = False
+                    self._taped = False
                     await ws.send(json.dumps({
                         "method": "subscribe",
                         "subscription": {"type": "l2Book", "coin": self.coin,
                                          "fast": True}}))
+                    # 成交掛在同一條連線（見 LighterBookFeed._subscribe 的理由）
+                    await ws.send(json.dumps({
+                        "method": "subscribe",
+                        "subscription": {"type": "trades", "coin": self.coin}}))
                     ptask = asyncio.create_task(self._pinger(ws))
                     async for raw in ws:
                         backoff = 1.0
