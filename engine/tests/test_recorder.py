@@ -95,6 +95,44 @@ def test_depth_columns_land_and_only_count_levels_inside_the_band():
             float(row[f"{side}_d{b}"])
 
 
+def test_schema_rotation_actually_renames_and_keeps_the_old_rows():
+    """舊 schema 的檔必須**真的**被改名，而且舊資料留著。
+
+    這一關之前不存在，所以一個致命的 bug 潛伏到 2026-09-12：
+    `os.replace` 寫在 `with open(self.path)` 區塊**裡面**，行程自己還開著
+    那個檔。Linux 允許對已開啟的 fd 改名，**Windows 不允許** —— 於是九個
+    錄製器每分鐘 log 一次「rotated to …」然後 PermissionError，一列都沒寫。
+
+    判準是**產物**（檔案有沒有被改名、舊列在不在、新檔的欄位對不對），
+    不是「程式碼裡有那一行」——那一行一直都在，而它從來沒有成功過。
+    """
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "minutes.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["minute_ts", "time_utc", "premium_close_bps"])   # 舊 schema
+        w.writerow([1_700_000_000, "2023-11-14T22:13:20Z", "1.23"])
+
+    e_book, h_book = OrderBook(), OrderBook()
+    set_book(e_book, 100.09, 100.11)
+    set_book(h_book, 99.99, 100.01)
+    rec = MinuteRecorder(path, e_book, h_book, staleness_sec=1e9)
+    rec.sample(1_700_000_000.0)
+    rec.close()
+
+    olds = [f for f in os.listdir(d) if f.endswith(".old")]
+    assert len(olds) == 1, f"沒有輪替：{os.listdir(d)}"
+    with open(os.path.join(d, olds[0]), newline="") as fh:
+        old_rows = list(csv.reader(fh))
+    assert old_rows[0] == ["minute_ts", "time_utc", "premium_close_bps"]
+    assert old_rows[1][2] == "1.23"          # 舊資料沒有被吃掉
+
+    with open(path, newline="") as fh:
+        new_rows = list(csv.reader(fh))
+    assert new_rows[0] == HEADER              # 新檔用新 schema
+    assert len(new_rows) == 2                 # 標題 + 剛寫的那一分鐘
+
+
 def test_stale_books_are_skipped():
     e_book, h_book = OrderBook(), OrderBook()
     path = os.path.join(tempfile.mkdtemp(), "minutes.csv")
