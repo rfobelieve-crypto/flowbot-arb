@@ -43,9 +43,26 @@ REFRESH_SEC = 30
 
 def read_pair(d: str, hours: float) -> dict | None:
     csv_path = os.path.join(d, "minutes.csv")
-    if not os.path.exists(csv_path):
-        return None
     name = os.path.basename(d.rstrip("\\/"))
+    sj = os.path.join(d, "status.json")
+    if not os.path.exists(csv_path):
+        # HMM (2026-09-13): an engine may run with `recorder.enabled: false`,
+        # and before this branch existed such an engine had NO ROW AT ALL --
+        # a live strategy invisible on the board that is supposed to watch it.
+        # Absence of minute data is not absence of an engine; liveness then
+        # comes from status.json's own mtime.
+        if not os.path.exists(sj):
+            return None
+        age = time.time() - os.stat(sj).st_mtime
+        out = {"pair": name, "age_sec": age, "alive": age < STALE_SEC,
+               "minutes": 0, "last": None, "premium_now": None,
+               "premium_med": None, "premium_p5": None, "premium_p95": None,
+               "sell_med": None, "buy_med": None, "status": None}
+        try:
+            out["status"] = json.load(io.open(sj, encoding="utf-8"))
+        except Exception:                                       # noqa: BLE001
+            pass
+        return out
     age = time.time() - os.stat(csv_path).st_mtime
     cutoff = time.time() - hours * 3600 if hours else 0
     rows, last = [], None
@@ -95,8 +112,15 @@ def render(pairs: list, hours: float) -> str:
         mode = st.get("running", "record-only")
         badge = ("<span class=bad>DEAD</span>" if not p["alive"]
                  else f"<span class=ok>{mode}</span>")
-        alert = (f'<span class=bad>{red[0]["what"]}</span>' if red else
-                 (f'<span class=warn>{guards[0]["what"]}</span>' if guards else ""))
+        # EVERY guard, not just the first (2026-09-13). With B6 a pair can
+        # carry several at once, and showing guards[0] hides the account-level
+        # ones behind whatever happened to be appended earlier -- the failure
+        # mode being that an engine blocked on margin looks like a quiet
+        # market. Reds first so the worst one is leftmost.
+        amber = [g for g in guards if g.get("level") != "red"]
+        alert = " ".join(
+            [f'<span class=bad>{g["what"]}</span>' for g in red]
+            + [f'<span class=warn>{g["what"]}</span>' for g in amber])
         sm, bm = p["sell_med"], p["buy_med"]
         side = ("both" if (sm or 0) > 0 and (bm or 0) > 0 else
                 "SELL only" if (sm or 0) > 0 else
@@ -109,6 +133,69 @@ def render(pairs: list, hours: float) -> str:
                 f"<td class=n>{fmt(p['premium_p5'])} … {fmt(p['premium_p95'])}</td>"
                 f"<td class=n>{fmt(sm)}</td><td class=n>{fmt(bm)}</td>"
                 f"<td class='{'ok' if side == 'both' else 'warn'}'>{side}</td></tr>")
+
+    # ------------------------------------------------------------ HMM block
+    # The premium table above answers "is there a band" -- that is the
+    # RECORDING family's question. A maker engine's question is different and
+    # none of its numbers appear up there: the four things the 9th override
+    # says are the only judgement (X4 M2/M3/M4/M5) are all in status.json and
+    # were, until today, written every 30 seconds and read by nothing.
+    def maker_row(p):
+        st = (p["status"] or {}).get("public") or {}
+        pv = (p["status"] or {}).get("private") or {}
+        c = st.get("counts") or {}
+        rested, fills = c.get("quotes_rested", 0), c.get("quote_fills", 0)
+        fr = st.get("fill_rate_pct")
+        # M2 判準：>=30% 可用、<10% 這條路關掉。0 筆報價時不著色 ——
+        # 「還沒開始」不是「不及格」（mistake.md 2026-09-03：ok 的語意是
+        # 連得上且設定對，不是有資料）。
+        fr_cls = ("" if not rested else
+                  "ok" if (fr or 0) >= 30 else
+                  "bad" if (fr or 0) < 10 else "warn")
+        pos = " ".join(f"{k} {fmt(v, 4)}"
+                       for k, v in (pv.get("positions") or {}).items())
+        # metrics.snapshot() is {key: {p50,p95,p99,max,n}} keyed by
+        # arb/hedge/quote/cancel. The first version of this row read
+        # lat["hedge_p50"], which does not exist -- the column would have been
+        # blank forever, and a column that can never populate is the same
+        # disease as a guard that can never fire (mistake.md 2026-09-03).
+        lat = st.get("latency_ms") or {}
+        hedge = lat.get("hedge") or {}
+        cancel = lat.get("cancel") or {}
+        # M4 判準：中位 <2s、p95 <10s。
+        m4_cls = ("" if not hedge else
+                  "ok" if (hedge.get("p50", 0) < 2000
+                           and hedge.get("p95", 0) < 10000) else "bad")
+        return (f"<tr><td><b>{p['pair']}</b></td>"
+                f"<td class=n>{rested}</td><td class=n>{fills}</td>"
+                f"<td class=n>{c.get('quotes_cancelled', 0)}</td>"
+                f"<td class='n {fr_cls}'>{fmt(fr, 1)}%</td>"
+                f"<td class=n>{c.get('post_only_rejects', 0)}</td>"
+                f"<td class=n>{c.get('unresolved_cancels', 0)}</td>"
+                f"<td class='n {m4_cls}'>{fmt(hedge.get('p50'), 0)}"
+                f" / {fmt(hedge.get('p95'), 0)}</td>"
+                f"<td class=n>{fmt(cancel.get('p50'), 0)}</td>"
+                f"<td class=n>{pos or '—'}</td>"
+                f"<td class=n>{fmt(pv.get('net_base'), 4)}</td>"
+                f"<td class=n>{fmt(pv.get('session_mtm_usd'), 4)}</td></tr>")
+
+    mk = [p for p in pairs
+          if ((p["status"] or {}).get("public") or {}).get("mode") == "maker"]
+    maker_block = "" if not mk else f"""
+<h1 style="margin-top:18px">HMM <span class=sub>— 掛單腿的執行面（X4 M2/M4）</span></h1>
+<table>
+<tr><th>pair</th><th class=n>掛出</th><th class=n>成交</th><th class=n>撤單</th>
+    <th class=n>M2 成交率</th><th class=n>po 拒絕</th><th class=n>撤單未確認</th>
+    <th class=n>M4 對沖 p50/p95 ms</th><th class=n>撤單 p50 ms</th>
+    <th class=n>部位</th><th class=n>淨</th><th class=n>session MTM $</th></tr>
+{"".join(maker_row(p) for p in mk)}
+</table>
+<div class=note><b>撤單未確認</b>不是雜訊：那是 <code>unknown</code> 狀態，
+ 意思是「可能已經成交」而不是「已經沒了」，而一張卡在 unknown 的單會擋住
+ 下一次報價（<code>maker.py</code> 規則三）。<b>M2</b> 的判準是
+ &ge;30% 可用、&lt;10% 這條路關掉 —— 0 筆報價時不著色，因為「還沒開始」
+ 不是「不及格」。<b>M3 成交後漂移還沒進快照</b>，那一欄之後補。</div>
+"""
 
     dead = [p for p in pairs if not p["alive"]]
     banner = (f'<div class="g bad">{len(dead)} recorder(s) not writing: '
@@ -140,6 +227,7 @@ def render(pairs: list, hours: float) -> str:
     <th class=n>sell edge</th><th class=n>buy edge</th><th>executable</th></tr>
 {"".join(row(p) for p in pairs)}
 </table>
+{maker_block}
 <div class=note>All figures in bps. "executable" is which direction had a positive
  median edge over the window — a pair that is <b>one-sided</b> can be entered but
  not unwound, which is the shape NBIS took on 09-03
