@@ -125,7 +125,16 @@ try {
         $kv = $_.Line -split '=', 2
         Set-Item -Path ("Env:" + $kv[0]) -Value $kv[1].Trim()
       }
-    $out = & python (Join-Path $Arb 'tools\scan_pull.py') 2>&1
+    # 明寫 UTF-8 再抓輸出：scan_pull 吐的是 UTF-8，而 PowerShell 預設用
+    # 主控台碼頁（cp950）解它 -> 中文變亂碼 -> log 裡那一行讀不懂。
+    # 讀不懂的 log 行等於沒記（engine/main.py 的 logging 註解、
+    # mistake.md 2026-09-11 的鏡像：那次是讀，這次是寫）。
+    $prevEnc = [Console]::OutputEncoding
+    try {
+      [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+      $env:PYTHONIOENCODING = 'utf-8'
+      $out = & python (Join-Path $Arb 'tools\scan_pull.py') 2>&1
+    } finally { [Console]::OutputEncoding = $prevEnc }
     $pullline = "$stamp UTC  scan_pull: " + (($out | Select-Object -Last 1) -replace '\s+', ' ')
     Remove-Item $Lock -Force -ErrorAction SilentlyContinue
   }
