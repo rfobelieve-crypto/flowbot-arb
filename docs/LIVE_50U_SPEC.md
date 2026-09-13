@@ -180,8 +180,42 @@ CLAUDE.md 的老規矩：**hard rules 寫進程式碼，不靠紀律**。這一�
 
 ### 上線前的憑證檢查表
 
-- [ ] HL：建 **API wallet**，主錢包只留這條線的資金
-- [ ] Lighter：**兩條鏈各一組**帳號與 API key，`config.py` 加 `_RH` 後綴環境變數
-- [ ] OKX／Bitget／Binance：子帳戶 ＋ 只勾交易 ＋ IP 白名單（東京 VPS 的固定 IP）
-- [ ] 唯讀 key 先行：M1 只需要讀成交，不需要下單權限
-- [ ] 金鑰**不進 git**、不進 Vercel（引擎在 AWS 東京，儀表板不碰金鑰）
+> **2026-09-13 實查更新**（`python tools/check_env.py --root`，全綠）。
+> 這份清單原本是 09-04 寫的**待辦**；今天逐項對過真實狀態之後，
+> 前兩項已經完成，而第三項的順序是錯的。勾與理由都寫在下面，
+> **不要再把它讀成五項都沒做**。
+
+- [x] HL：建 **API wallet** —— 已建，agent `Arb`
+      `0xa8fb9b859bea35606212eaa9ef6f37e7c3d11e54`，**到期 2026-12-11 12:20Z**。
+      agent wallet 不能提幣或轉帳，所以上面「三件事」的第 1 條已經落地。
+      **到期日要進新鮮度看板**：agent 過期後簽章會安靜失效，而那是引擎
+      解釋不了的錯誤。
+- [x] Lighter mainnet：帳號索引 ＋ API key 索引 ＋ API 私鑰 —— 已填、
+      **實測可簽**（chain_id 304）。
+- [ ] Lighter **RH 鏈**：`config.py` 的 `_RH` 後綴環境變數**已經加好了**
+      （`config.py:49`），缺的只是**另一個帳號與另一把 key**。
+      地雷寫在 `config.py:53`：`LIGHTER_RH_*` 為空時會**回退到 mainnet 的
+      憑證**再指向 RH 的 host —— 不報錯，拿 chain 304 的簽章打 chain 466324。
+      判準是 `check_env.py` 的 `[3] Lighter Robinhood 鏈` 那一行變成 OK，
+      **不是引擎啟動成功**。
+- [ ] OKX／Bitget／Binance 的**交易** key：**順序反了，現在辦是白做。**
+      引擎的 `HEDGE_VENUES = (lighter, lighter-rh, tradexyz)`，
+      entropy 腿是 HL —— **沒有 CEX 場館模組，金鑰辦好了也下不了單。**
+      先寫模組，再辦 key。（影響面：§1.40 的 290 個正毛邊際配對裡有
+      212 個的對沖腿在 CEX 或 `lighter-std`，全部要等這一步。）
+- [ ] **唯讀 key 先行（這一項仍然成立，而且獨立有價值）**：`../arb/.env` 的
+      `OKX_/BITGET_/BINANCE_` 給 `fee_receipts.py`（M1）用，只要讀取權限、
+      不勾提幣、綁 IP。M1 要回答的是「費率表相信的數字 vs 交易所實際收的
+      數字」，而我們的費率到今天仍然是**文件查證不是收據查證**。
+- [x] 金鑰**不進 git**、不進 Vercel —— `.gitignore` 已覆蓋 `.env*`。
+- [ ] **入金**：兩所各 $50 是本規格 §0 凍結的值。今天的實況是
+      Lighter $18.89、**HL $0.00** —— 所以現在的綁束是抵押品，不是 size。
+      轉帳由操作者執行。
+
+> **一個本規格沒寫、而掛單模式會撞到的結構問題**：引擎一次只允許一張
+> 掛單（`engine.py` `_scan_maker`：`if self._maker_open: return None`），
+> 而一個行程只跑一個 ticker。所以 N 個市場 = N 個行程，
+> **共用同一個 Lighter 帳號與同一個 HL 帳號**，而 `max_position_usd` /
+> `max_gross_usd` 是逐行程的 —— N 個行程各自守住上限，帳戶層可以是 N 倍。
+> flow_system 的 CLAUDE.md 已經為「kill switch 分不出虧損是誰造成的」
+> 付過兩次代價。**沒有中央曝險帳本之前，掛單模式上線的市場數是 1。**
