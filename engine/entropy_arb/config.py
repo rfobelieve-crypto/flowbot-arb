@@ -122,6 +122,11 @@ class VenueConf:
     lighter_profile: Optional[LighterProfile] = None
     lighter_creds: Optional[LighterCreds] = None
     lighter_venue: str = ""   # "lighter" | "lighter-rh" (funding poller key)
+    # How often this venue's ws feed proves it is alive by asking for a
+    # frame. 0 = never (the venue only answers pings it receives).
+    # Set from execution.ws_ping_sec: it has to be chosen together with
+    # staleness_sec, so the two numbers live in the same block.
+    ws_ping_sec: float = 0.0
 
 
 @dataclass
@@ -360,6 +365,7 @@ _SCHEMA: Dict[str, Any] = {
         "max_consecutive_errors": int,
         "rate_limit_pause_sec": float,
         "staleness_sec": float,
+        "ws_ping_sec": float,    # feed keepalive; pairs with staleness_sec
         "reconcile_sec": float,
         "venue_probe_sec": float,
         "http_keepalive_sec": float,
@@ -657,6 +663,15 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
             lighter_creds=_lighter_creds(hedge_venue),
             lighter_venue=hedge_venue,
         )
+
+    # The feed keepalive. Default 0.0 keeps every existing config
+    # byte-for-byte: the recording family counts `samples` with
+    # is_fresh() -> alive_ts, so turning pings on globally would inflate
+    # that count and move an instrument under a measurement in flight
+    # (book.is_fresh docstring; recorder.py:341).
+    ws_ping_sec = float(_get(raw, "execution", "ws_ping_sec", 0.0))
+    entropy.ws_ping_sec = ws_ping_sec
+    hedge.ws_ping_sec = ws_ping_sec
 
     return Config(
         max_net_base=max_net_base,

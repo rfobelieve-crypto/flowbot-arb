@@ -261,7 +261,8 @@ class LighterVenue:
     def start_tasks(self, stop: asyncio.Event, notify, live: bool) -> list:
         tasks = [asyncio.create_task(
             LighterBookFeed(self.name, self.profile.ws_url, self.market_id,
-                            self.book, notify).run(stop),
+                            self.book, notify,
+                            ping_sec=self.conf.ws_ping_sec).run(stop),
             name=f"book-{self.key}")]
         if live and self.signer is None:
             # Shadow mode reaches here: the strategy runs but no signer was

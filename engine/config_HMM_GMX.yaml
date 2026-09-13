@@ -47,7 +47,36 @@ execution:
   maker_min_edge_bps: 5.0     # 邊際衰退到這裡就撤掉那張報價
   premium_persist_sec: 2.0
   cooldown_sec: 0.0
-  staleness_sec: 10.0
+  # 2026-09-13：10.0 -> 30.0，而這個數字是量出來的不是猜的。
+  #
+  # staleness_sec 比的是 book.alive_ts，而 alive_ts 由**任何入站訊框**蓋
+  # （feeds.py 的 touch() 在型別分派之前）。它的語意是「只有死掉的訂閱才算
+  # 過期，安靜的市場不算」—— 而在 GMX 上那句話原本不成立：
+  #
+  #   HL 的 feed 每 5 秒主動 ping，所以它建構上每 ≤5 秒有一個訊框
+  #   Lighter 的 feed 只被動回 pong  ->  完全看市場臉色
+  #   GMX 在 Lighter 的日成交額 $9,534，頂檔中位 32 秒才動一次
+  #
+  # 實測（10 分鐘，同一條 WS，兩段）：
+  #   被動          max 訊框空檔 20.10s，>10s 佔 24.6%
+  #   每 5 秒 ping  max 訊框空檔 12.08s，>10s 佔  1.0%
+  # 而 shadow 實跑的後果：22:44 開機 -> 22:59 HALT，十五分鐘用完五個 episode。
+  #
+  # 所以兩件事一起做：下面打開 ws_ping_sec，門檻放到 30。
+  # 30 的由來：有心跳之後最差 12.1 秒（約每六次 ping 有一次沒被回，所以要
+  # 留兩次的餘裕），30 秒 = 連續四次以上沒回 = 真的有事。
+  #
+  # 放寬它**沒有**製造盲點 —— 真正的斷線偵測本來就不靠這個數字：
+  #   websockets 的 ping_interval 50 / ping_timeout 20  -> 連線 ≤70s 內被關掉
+  #   venue_probe_sec 30                                -> REST 側獨立偵測
+  # 這個數字實際在擋的是「拿一個可能已經錯的價格去下單」，而在一個 32 秒才
+  # 動一次的簿口上，10 秒前的價格就是現在的價格。
+  staleness_sec: 30.0
+  # feed 每隔這麼久主動要一個訊框（0 = 關）。**預設是關的**，因為
+  # recorder.py:341 用 is_fresh() -> alive_ts 數 samples，全域打開會膨脹
+  # 九支錄製器的樣本數 = 在進行中的量測底下換尺。這裡只對 HMM 打開。
+  # 5.0 是照抄 HL feed 的 ping_sec，實測伺服器回 pong 中位 38 毫秒。
+  ws_ping_sec: 5.0
   reconcile_sec: 15.0
   settle_timeout_sec: 10.0
   leg_slippage_bps: 50.0

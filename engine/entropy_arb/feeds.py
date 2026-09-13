@@ -70,7 +70,8 @@ class LighterBookFeed:
     """zkLighter order book for one market over one connection."""
 
     def __init__(self, name: str, ws_url: str, market_id: int, book: OrderBook,
-                 notify: Callable[[], None]) -> None:
+                 notify: Callable[[], None],
+                 ping_sec: float = 0.0) -> None:
         self.name = name
         self.ws_url = ws_url
         self.market_id = market_id
@@ -79,6 +80,41 @@ class LighterBookFeed:
         self._nonce: Optional[int] = None
         self._synced = False
         self._taped = False
+        # 0 = off, and that is the default ON PURPOSE. See config.py:
+        # the recording family counts a minute as sampled via
+        # is_fresh() -> alive_ts, and a ping refreshes alive_ts.
+        self.ping_sec = ping_sec
+
+    async def _pinger(self, ws) -> None:
+        """Ask the server for a frame on OUR schedule.
+
+        Mirrors HLBookFeed._pinger, which this feed never had -- and that
+        asymmetry is the whole bug: `staleness_sec` compares against
+        alive_ts, HL refreshes alive_ts every 5s by construction, and
+        Lighter refreshed it only when the market happened to move.
+        On GMX ($9.5k/day) that meant 24.6%% of frame gaps exceeded the
+        10s threshold and shadow HALTed 15 minutes after start.
+
+        Measured 2026-09-13: the server answers {"type":"ping"} with a
+        pong in 38 ms, and a 5s ping cadence takes the worst observed
+        gap from 20.1s to 12.1s (not 5s: roughly one ping in six goes
+        unanswered, so the threshold still needs room for two misses).
+
+        If the server stops answering, this does NOT paper over it:
+        alive_ts simply stops moving and the freshness check fires,
+        which is the behaviour we want from a dead feed.
+        """
+        try:
+            while True:
+                await asyncio.sleep(self.ping_sec)
+                await ws.send(json.dumps({"type": "ping"}))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
     async def _subscribe(self, ws) -> None:
         await ws.send(json.dumps({"type": "subscribe",
@@ -147,12 +183,15 @@ class LighterBookFeed:
     async def run(self, stop: asyncio.Event) -> None:
         backoff = 1.0
         while not stop.is_set():
+            ptask = None
             try:
                 async with ws_connect(self.ws_url, **WS_KWARGS) as ws:
                     log.info("[%s] connected (%s)", self.name, self.ws_url)
                     self.book.clear()
                     self._nonce = None
                     self._synced = False
+                    if self.ping_sec > 0:
+                        ptask = asyncio.create_task(self._pinger(ws))
                     async for raw in ws:
                         backoff = 1.0
                         msg = json.loads(raw)
@@ -175,6 +214,9 @@ class LighterBookFeed:
             except Exception as e:
                 log.warning("[%s] ws error: %s — reconnect in %.0fs",
                             self.name, e, backoff)
+            finally:
+                if ptask is not None:
+                    ptask.cancel()
             self.book.ready = False
             self.notify()
             if stop.is_set():

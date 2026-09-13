@@ -2,6 +2,7 @@
 
 Run:  python3 -m pytest tests/  (or  python3 tests/test_config.py)
 """
+import io
 import os
 import sys
 import tempfile
@@ -107,3 +108,50 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"{name:40s} OK")
+
+
+def test_ws_ping_defaults_to_off():
+    """The feed keepalive must stay OFF unless a config asks for it.
+
+    `recorder.py` counts a minute as sampled with `is_fresh(staleness_sec)`,
+    which reads `book.alive_ts`, which ANY inbound frame refreshes. Turning
+    client pings on globally would therefore inflate `samples` for the nine
+    recorders -- moving what counts as a sample under a measurement already
+    in flight, which is exactly what `book.is_fresh`'s docstring forbids.
+
+    So the default is 0.0 and only config_HMM_GMX.yaml opts in. If someone
+    later gives this a non-zero default, this test is what says no.
+    """
+    cfg = load_config(write_tmp(MINIMAL), symbol="SNDK",
+                      hedge_venue="lighter", env_file=NO_ENV)
+    assert cfg.entropy.ws_ping_sec == 0.0
+    assert cfg.hedge.ws_ping_sec == 0.0
+
+
+def test_ws_ping_opt_in_is_wired_through():
+    """And when a config does ask, it reaches both legs.
+
+    A setting that parses but never reaches the feed is the same disease as
+    a guard that cannot fire: it looks configured and does nothing.
+    """
+    cfg = load_config(write_tmp(MINIMAL + """
+execution:
+  ws_ping_sec: 5.0
+  staleness_sec: 30.0
+"""), symbol="SNDK", hedge_venue="lighter", env_file=NO_ENV)
+    assert cfg.entropy.ws_ping_sec == 5.0
+    assert cfg.hedge.ws_ping_sec == 5.0
+    assert cfg.staleness_sec == 30.0
+
+
+def test_recording_family_configs_have_no_ws_ping():
+    """The nine recorders must stay byte-for-byte on the old behaviour.
+
+    Not a style check -- `samples` is the §0.75 family's own denominator.
+    """
+    import glob
+    changed = [os.path.basename(p)
+               for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
+               if os.path.basename(p) != "config_HMM_GMX.yaml"
+               and "ws_ping_sec" in io.open(p, encoding="utf-8").read()]
+    assert not changed, f"recording configs gained ws_ping_sec: {changed}"
