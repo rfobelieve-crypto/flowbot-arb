@@ -1,0 +1,26 @@
+# Railway：跨場館掃描器 ＋ 唯讀檔案端點（2026-09-13，docs/DEPLOY.md §6）
+#
+# **這個映像檔裡沒有任何交易金鑰，而且不可以有。**
+# 掃描器是純 REST、零憑證、不下單 —— 那正是它可以離開「唯一有金鑰的那台
+# 機器」的原因。唯一的祕密是 SCAN_TOKEN，它保護的是唯讀端點不要變成公開的；
+# 它外洩的後果是「別人看得到公開盤口資料」，不是任何交易能力。
+#
+# 相依刻意只裝 requests：引擎那堆 aiohttp / websockets / rich 是給 WS 與
+# 終端機面板用的，掃描器一個都不需要。映像檔小 = 部署快 = 重啟窗口短。
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+RUN pip install --no-cache-dir "requests>=2.31"
+
+# 只複製跑得起來需要的東西。arblib/ 與 docs/ 不進去 —— 判斷層留在本機，
+# 這裡只負責蒐集（scanner.py 的檔頭：This file only COLLECTS）。
+COPY engine/tools/scanner.py  engine/tools/scanner.py
+COPY tools/scan_service.py    tools/scan_service.py
+
+# 掃描器寫 engine/logs/scan/。Railway 的檔案系統是暫存的，而那是可接受的：
+# 本機每輪拉一次，這裡只留兩天的滾動緩衝（scan_service.KEEP_DAYS）。
+RUN mkdir -p engine/logs/scan
+
+CMD ["python", "tools/scan_service.py"]
