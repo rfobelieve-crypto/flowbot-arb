@@ -92,6 +92,39 @@ def load() -> pd.DataFrame:
     return df.sort_values("ts").reset_index(drop=True)
 
 
+# Which fetch block of scanner.quote_all each venue lands in. Legs inside one
+# block go out on the same ThreadPoolExecutor (measured mutual skew 1-8 s);
+# the blocks themselves run one after another, and the lighter one is a serial
+# loop with a sleep, so a cross-block pair's two quotes are ~50 s apart while
+# sharing one `ts` (flow_system TODO 1.39, 2026-09-13).
+#
+# This is REPORTED, not applied: the promotion metric below is byte-for-byte
+# the one frozen on 2026-08-30. But a cross-block band carries
+# sigma*sqrt(skew/grid) of dispersion that is fetch order rather than market
+# -- on BTC that is 4.7 bps measured against 0.8 bps for a same-block pair and
+# 0.985 from the WS recorder -- and the venue it inflates most (lighter) is the
+# cheapest one, i.e. exactly the pairs we most want to promote. So every row
+# says which blocks its legs came from.
+FETCH_BLOCK = {
+    "HL": "hl", "xyz": "hl", "para": "hl", "mkts": "hl", "io": "hl",
+    "ENTROPY": "hl", "hyna": "hl",
+    "okx": "cex", "bitget": "cex", "binance": "cex",
+    "lighter": "lighter", "lighter-rh": "lighter",
+}
+# Measured 2026-09-13 from lag-0 return correlation against binance on BTC,
+# 180 s grid: skew ~= (1 - rho) * grid.
+BLOCK_SKEW_S = {("hl", "cex"): 8.0, ("cex", "lighter"): 53.0,
+                ("hl", "lighter"): 45.0}
+
+
+def leg_skew_s(leg_a: str, leg_b: str) -> float:
+    """Measured seconds between this pair's two quotes. 0 = same fetch block."""
+    ba, bb = FETCH_BLOCK.get(leg_a), FETCH_BLOCK.get(leg_b)
+    if ba is None or bb is None or ba == bb:
+        return 0.0
+    return BLOCK_SKEW_S.get((ba, bb)) or BLOCK_SKEW_S.get((bb, ba)) or 0.0
+
+
 def two_sided(g: pd.DataFrame) -> dict:
     """Can this pair's premium even REACH both sides? (2026-09-05)
 
@@ -173,12 +206,16 @@ def main() -> int:
         buy = side_metric(g, "buy_edge_bps", ("b_bid_usd", "a_ask_usd"))
         best = max(sell, buy, key=lambda s: s["capturable_usd_per_day"])
         ts = two_sided(g)
+        skew = leg_skew_s(g.leg_a.iloc[0], g.leg_b.iloc[0])
         rows.append({"pair": pair, "n": int(len(g)),
                      "leg_b": g.leg_b.iloc[0], "listed_h": listed_h,
                      "sell": sell, "buy": buy, **ts,
                      "capturable_usd_per_day": best["capturable_usd_per_day"],
                      "band_bps": best["band_bps"], "depth_usd": best["depth_usd"],
-                     "fires_per_day": best["fires_per_day"]})
+                     "fires_per_day": best["fires_per_day"],
+                     # Seconds between this pair's two quotes. Non-zero means
+                     # the band below is part fetch order -- see FETCH_BLOCK.
+                     "leg_skew_s": skew})
     tab = pd.DataFrame(rows).sort_values("capturable_usd_per_day", ascending=False)
 
     ctrl = tab[tab.pair.str.startswith("BTC@")]
@@ -187,6 +224,18 @@ def main() -> int:
     for _, r in ctrl.iterrows():
         print(f"    {r.pair:22s} band {r.band_bps} bps  depth ${r.depth_usd}  "
               f"≈ ${r.capturable_usd_per_day}/天")
+
+    # Leg skew: REPORTED, never applied. The metric is the frozen one.
+    sk = tab[tab.leg_skew_s > 0]
+    if len(sk):
+        print(f"\n  **腿間偏移（掃描器分段序列抓，不是同時）—— 只報告不參與排序：**")
+        for s, grp in sorted(sk.groupby("leg_skew_s"), key=lambda x: -x[0]):
+            print(f"    偏移約 {s:4.0f} 秒：{len(grp):4d} 個配對"
+                  f"（band 中位 {grp.band_bps.median():.2f} bps）")
+        print(f"    偏移 0 秒（同一抓取段）：{int((tab.leg_skew_s == 0).sum()):4d} 個配對"
+              f"（band 中位 {tab[tab.leg_skew_s == 0].band_bps.median():.2f} bps）")
+        print("    偏移 δ 在 180 秒格上注入約 σ√(δ/180) 的**假**價差。BTC 實測："
+              "跨段 4.7 bps vs 同段 0.8 bps vs WS 錄製器 0.985（TODO §1.39）")
 
     eligible = tab[(tab.n >= MIN_SAMPLES)
                    & ((tab.listed_h.isna()) | (tab.listed_h >= MIN_LISTED_H))
@@ -203,7 +252,8 @@ def main() -> int:
         print(f"    {reach}{r.pair:22s} n={r.n:4d}  band {str(r.band_bps):>7s} bps  "
               f"{r.fires_per_day:6.1f}/天  depth ${str(r.depth_usd):>8s}  "
               f"≈ ${r.capturable_usd_per_day:>8}/天  "
-              f"｜擺盪 2σ−價差 {str(r.margin_bps):>7s} bps")
+              f"｜擺盪 2σ−價差 {str(r.margin_bps):>7s} bps"
+              f"｜腿差 {r.leg_skew_s:3.0f}s")
     n_one = int((show.reaches_both == False).sum())          # noqa: E712
     if n_one:
         print()

@@ -131,7 +131,11 @@ HEADER = ["ts", "time_utc", "pair", "leg_a", "sym_a", "leg_b", "sym_b",
           # get if you are willing to pay a little, which is how the trade is
           # actually sized.
           "a_bid_usd_1bps", "a_ask_usd_1bps", "b_bid_usd_1bps", "b_ask_usd_1bps",
-          "a_bid_usd_3bps", "a_ask_usd_3bps", "b_bid_usd_3bps", "b_ask_usd_3bps"]
+          "a_bid_usd_3bps", "a_ask_usd_3bps", "b_bid_usd_3bps", "b_ask_usd_3bps",
+          # When each leg was actually fetched. `ts` is ONE stamp for the
+          # whole cycle, but the three fetch blocks are sequential -- see
+          # quote_all. Appended at the end so old CSVs still parse.
+          "a_fetch_ms", "b_fetch_ms"]
 DEPTH_BPS = (1.0, 3.0)
 BOOK_LEVELS = 25
 
@@ -555,8 +559,34 @@ def lighter_top(venue: str, market_id: int):
     return bids[0][0], asks[0][0], _cum(bids, bids[0][0], True), _cum(asks, asks[0][0], False)
 
 
-def quote_all(pairs: list) -> dict:
-    """One quote per distinct leg per cycle, keyed (kind, venue, sym)."""
+def quote_all(pairs: list) -> tuple:
+    """One quote per distinct leg per cycle, keyed (kind, venue, sym).
+
+    Returns (quotes, fetched_ms) -- the SECOND value is why this docstring
+    got longer (2026-09-13, flow_system TODO 1.39).
+
+    The three blocks below run SEQUENTIALLY, and the lighter one is a plain
+    loop with a sleep between calls, so a leg fetched in block 3 can be
+    ~50 seconds younger than its partner fetched in block 2. `scan_once`
+    stamps every row with ONE `ts` taken before any of this, which made that
+    skew invisible: measured from the data, lag-0 return correlation against
+    binance is 0.996 for okx (same pool), 0.957 for HL (previous block) and
+    **0.703 for lighter** -- about 53 seconds at a 180 s sampling grid.
+
+    A skew of d seconds on a grid of T injects roughly sigma*sqrt(d/T) of
+    FAKE premium dispersion. On BTC (sigma = 8.0 bps per 180 s) that is
+    4.3 bps predicted against 4.7 bps measured for lighter-binance, while
+    lighter vs lighter-rh (same block) is 0.8 and the WS recorder -- which
+    reads both books at one instant -- says 0.985. So roughly 94% of the
+    variance of this scanner's lighter-vs-CEX "premium" is its own fetch
+    order, not the market.
+
+    That is a property of polling 3,000+ pairs over public REST and cannot
+    be removed here (Lighter has no bulk top-of-book endpoint: orderBookDetails
+    returns 234 markets but only mark/index/last). What it CAN be is visible,
+    which is what the per-leg timestamp is for: scan_rank prints the gap next
+    to the band so nobody reads a cross-block band as a synchronous one.
+    """
     jobs = {}
     for p in pairs:
         for side in ("a", "b"):
@@ -567,9 +597,11 @@ def quote_all(pairs: list) -> dict:
     lt_jobs = [k for k in jobs if k[0] == "lighter"]
     cex_jobs = [k for k in jobs if k[0] in ("okx", "bitget", "binance")]
     out = {}
+    when: dict = {}
     with ThreadPoolExecutor(max_workers=HL_WORKERS) as ex:
         for k, q in zip(hl_jobs, ex.map(lambda k: _safe(hl_top, k[2]), hl_jobs)):
             out[k] = q
+            when[k] = time.time()
 
     def _cex(k):
         fn = {"okx": okx_top, "bitget": bitget_top, "binance": binance_top}[k[0]]
@@ -578,10 +610,12 @@ def quote_all(pairs: list) -> dict:
     with ThreadPoolExecutor(max_workers=CEX_WORKERS) as ex:
         for k, q in zip(cex_jobs, ex.map(_cex, cex_jobs)):
             out[k] = q
+            when[k] = time.time()
     for k in lt_jobs:
         out[k] = _safe(lighter_top, k[1], jobs[k]["market_id"])
+        when[k] = time.time()
         time.sleep(REQ_SPACING)
-    return out
+    return out, when
 
 
 def _safe(fn, *a):
@@ -594,7 +628,36 @@ def _safe(fn, *a):
 # ───────────────────────────────────────────────────────────────── output ──
 
 def _writer(path: str, header: list):
+    """Append to `path`, rotating it first if its header is not ours.
+
+    Without this, adding a column ships 31-field rows under a 29-field header
+    and `pd.read_csv` raises on the whole file -- one new column would take
+    out every reader of every day. Appending columns at the END keeps old
+    files parseable, but the file being appended to RIGHT NOW is the one that
+    goes ragged, so it has to be rotated.
+
+    The rotated name keeps matching `scan_*.csv`, deliberately: the recorder
+    family once rotated to `.old` and a downstream counter stopped seeing
+    those rows and restarted from zero (flow_system mistake.md 2026-08-29).
+    A rotation must not hide data from the loader.
+    """
     new = not os.path.exists(path) or os.path.getsize(path) == 0
+    if not new:
+        try:
+            with open(path, "r", encoding="utf-8") as rf:
+                first = (rf.readline() or "").strip().split(",")
+        except Exception:
+            first = []
+        if first and first != [str(h) for h in header]:
+            base = path[:-4] if path.endswith(".csv") else path
+            n = 1
+            while os.path.exists("%s_h%d.csv" % (base, n)):
+                n += 1
+            dst = "%s_h%d.csv" % (base, n)
+            os.rename(path, dst)
+            log(f"header changed -> rotated {os.path.basename(path)} to "
+                f"{os.path.basename(dst)} ({len(first)} cols -> {len(header)})")
+            new = True
     fh = open(path, "a", newline="", encoding="utf-8")
     w = csv.writer(fh)
     if new:
@@ -607,7 +670,7 @@ def scan_once(pairs: list) -> tuple:
     ts = int(time.time())
     tiso = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     day = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
-    q = quote_all(pairs)
+    q, qts = quote_all(pairs)
     fh, w = _writer(os.path.join(OUT_DIR, f"scan_v5_{day}.csv"), HEADER)
     n_ok = n_scale = 0
     try:
@@ -641,7 +704,11 @@ def scan_once(pairs: list) -> tuple:
                             round(mb.get("vol24") or 0.0, 0),
                             mb.get("created_at") or "",
                             a_bidd[1], a_askd[1], b_bidd[1], b_askd[1],
-                            a_bidd[2], a_askd[2], b_bidd[2], b_askd[2]])
+                            a_bidd[2], a_askd[2], b_bidd[2], b_askd[2],
+                            int(qts.get((ma["kind"], ma.get("venue", ""),
+                                         ma["sym"]), 0) * 1000),
+                            int(qts.get((mb["kind"], mb.get("venue", ""),
+                                         mb["sym"]), 0) * 1000)])
                 n_ok += 1
             except Exception as e:              # one pair must never kill the cycle
                 log(f"pair {p['pair']} failed: {e!r}")
