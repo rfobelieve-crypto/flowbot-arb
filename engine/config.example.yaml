@@ -203,14 +203,17 @@ risk:
   # honouring the $400 above can put $2,000 on one account, and every guard
   # before this line is computed from this process's own two legs.
   #
-  # This is the ceiling on what the whole ACCOUNT carries, across every market
-  # and every process, read back from the venue itself (no extra API calls --
-  # entropy_arb/account.py). It must be >= max_gross_usd, and live trading
-  # refuses to start without it, because "0 = disabled" is only safe when
-  # exactly one live process exists and nothing shows you how many there are.
-  # 这一条是**帐户层**上限（所有市场、所有行程合计），直接读交易所回报；
-  # 上面每一条都是逐行程的，N 个行程各自守住也会在帐户层超出。
-  max_account_gross_usd: 1000.0
+  # This is the ceiling on what ONE ACCOUNT carries, across every market and
+  # every process, read back from the venue itself (no extra API calls --
+  # entropy_arb/account.py). PER ACCOUNT, so what must fit inside it is a
+  # LEG's max_position_usd (above), not max_gross_usd: the two legs settle on
+  # two venues whose collateral pools are separate, and summing them against
+  # one pool's number is a units error. Live trading refuses to start without
+  # it, because "0 = disabled" is only safe when exactly one live process
+  # exists and nothing shows you how many there are.
+  # 这一条是**单一帐户**的上限（该帐户所有市场、所有行程合计），直接读交易所
+  # 回报；要放得下的是「那条腿的 max_position_usd」，不是两条腿的和。
+  max_account_gross_usd: 1500.0
   # The floor on free collateral the ACCOUNT must still have before this
   # process opens anything new. Separate from the cap above because the danger
   # is not the hedged book you hold, it is posting a leg whose hedge cannot be

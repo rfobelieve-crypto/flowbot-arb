@@ -56,7 +56,7 @@ class StubVenue:
                             [{"px": str(ask), "sz": str(sz)}]])
 
 
-def make_engine(risk: str = "") -> Engine:
+def make_engine(risk: str = "", legs: str = "") -> Engine:
     try:
         asyncio.get_event_loop()
     except RuntimeError:
@@ -64,7 +64,7 @@ def make_engine(risk: str = "") -> Engine:
     f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
     f.write("thresholds:\n  midline_bps: 5.0\n  upper_bps: 4.0\n"
             "  lower_bps: 3.0\nexecution:\n  premium_persist_sec: 0.0\n"
-            + (("risk:\n" + risk) if risk else ""))
+            + legs + (("risk:\n" + risk) if risk else ""))
     f.close()
     cfg = load_config(f.name, NO_ENV, symbol="SNDK", hedge_venue="lighter-rh")
     eng = Engine(cfg)
@@ -182,13 +182,20 @@ def test_account_under_cap_does_not_halt():
 
 # ---------------------------------------------------------------- A: config
 
-def test_account_cap_below_process_cap_is_refused():
+def test_account_cap_below_a_legs_own_cap_is_refused():
+    """Units: the account ceiling is compared against ONE venue's gross, so
+    what must fit inside it is that leg's max_position_usd -- not
+    max_gross_usd, which sums two legs sitting on two separate collateral
+    pools."""
     with pytest.raises(ConfigError) as e:
-        make_engine("  max_gross_usd: 500\n  max_account_gross_usd: 100\n")
-    assert "below" in str(e.value)
-    # and the sane ordering loads
-    eng = make_engine("  max_gross_usd: 500\n  max_account_gross_usd: 5000\n")
-    assert eng.cfg.max_account_gross_usd == 5000.0
+        make_engine("  max_account_gross_usd: 100\n",
+                    legs="entropy:\n  max_position_usd: 500\n")
+    assert "below a leg" in str(e.value)
+    # Two legs summing ABOVE the ceiling is legal: they are two accounts.
+    eng = make_engine("  max_gross_usd: 800\n  max_account_gross_usd: 500\n",
+                      legs="entropy:\n  max_position_usd: 400\n"
+                           "hedge:\n  max_position_usd: 400\n")
+    assert eng.cfg.max_account_gross_usd == 500.0
 
 
 def test_live_requires_both_account_switches():
@@ -269,9 +276,21 @@ def build_tree(tmp, jobs, wd=WD):
     return eng
 
 
-def cfg_text(proc_cap, acct_cap, free=50):
-    return ("risk:\n  max_gross_usd: %s\n  max_account_gross_usd: %s\n"
-            "  min_account_free_usd: %s\n" % (proc_cap, acct_cap, free))
+def cfg_text(leg_cap, acct_cap, free=50):
+    """`leg_cap` is the PER-LEG max_position_usd, which is what B3 sums.
+
+    The account ceiling is checked against one account's own gross, and the
+    two legs settle on two accounts that do not share collateral -- so the
+    quantity that may be summed against it is the per-venue cap, never
+    max_gross_usd (the sum of both legs). max_gross_usd is set to 2x here
+    only to keep the config internally consistent.
+    """
+    return ("entropy:\n  max_position_usd: {c}\n"
+            "hedge:\n  max_position_usd: {c}\n"
+            "risk:\n  max_gross_usd: {g}\n"
+            "  max_account_gross_usd: {a}\n"
+            "  min_account_free_usd: {f}\n"
+            .format(c=leg_cap, g=2 * leg_cap, a=acct_cap, f=free))
 
 
 def test_registry_parse_refuses_an_empty_table(tmp_path):

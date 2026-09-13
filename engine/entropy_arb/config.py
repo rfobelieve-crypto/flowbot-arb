@@ -189,8 +189,13 @@ class Config:
     # processes each honouring $1,000 can put $5,000 on one account, and every
     # guard above is computed from self.venues (this process's two legs).
     #
-    # This is the ceiling on what the ACCOUNT carries across ALL markets, read
+    # This is the ceiling on what ONE ACCOUNT carries across ALL markets, read
     # from the venue itself (entropy_arb/account.py; zero extra API calls).
+    # PER ACCOUNT, not summed over the two legs: the two legs settle on two
+    # different venues whose collateral pools are separate, so one number
+    # compared against each pool's own gross is the only coherent unit. The
+    # thing it must leave room for is therefore `max_position_usd` (per venue),
+    # not `max_gross_usd` (the sum of both).
     # unexplained_position_halt already catches a second bot trading the SAME
     # market; this catches one trading a different market on the same account,
     # which leaves our own position perfectly explained.
@@ -483,14 +488,26 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     if max_account_gross_usd < 0:
         raise ConfigError("risk.max_account_gross_usd must be >= 0 "
                           "(0 disables)")
-    # An account ceiling BELOW this process's own ceiling is a config that
-    # cannot be satisfied: our own legs alone would breach it. Refuse at load
+    # An account ceiling below this process's own PER-VENUE ceiling is a config
+    # that cannot be satisfied: one leg alone would breach it. Refuse at load
     # rather than halt on the first fill.
-    if 0 < max_account_gross_usd < max_gross_usd:
+    #
+    # The comparison is against cap_usd (per venue), NOT max_gross_usd. That
+    # matters and it was wrong in the first version of B6: max_gross_usd is the
+    # SUM over both legs of this process, while max_account_gross_usd is
+    # checked against ONE account's own gross, and the two legs settle on two
+    # different accounts that do not share collateral. Comparing the sum to a
+    # per-account number forced the account ceiling to ~2x what either account
+    # actually carries -- the same units mistake as mistake.md 2026-09-03
+    # (a per-venue quantity read as if it were the aggregate).
+    leg_caps = [float(_get(raw, "entropy", "max_position_usd", 1000.0)),
+                float(_get(raw, "hedge", "max_position_usd", 1000.0))]
+    if 0 < max_account_gross_usd < max(leg_caps):
         raise ConfigError(
             f"risk.max_account_gross_usd ${max_account_gross_usd:,.2f} is "
-            f"below risk.max_gross_usd ${max_gross_usd:,.2f} — the account "
-            f"ceiling must leave room for this process's own ceiling")
+            f"below a leg's own max_position_usd ${max(leg_caps):,.2f} — the "
+            f"account ceiling is PER ACCOUNT (one leg's venue), so it must "
+            f"leave room for that leg alone")
     min_account_free_usd = float(_get(raw, "risk", "min_account_free_usd", 0.0))
     if min_account_free_usd < 0:
         raise ConfigError("risk.min_account_free_usd must be >= 0 (0 disables)")

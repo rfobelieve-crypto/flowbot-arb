@@ -91,6 +91,12 @@ class HLVenue:
         # Also cleared when two venues share one HL account (count once).
         self.include_core_equity = not conf.hl_dex
         self.fee_bps = conf.fee_bps
+        # B3's maker path reads this off the venue (engine._plan_quote). It was
+        # only ever on VenueConf, so `mode: maker` raised AttributeError at the
+        # FIRST evaluation on either leg -- found 2026-09-13 by the first
+        # --shadow rehearsal, not by any test. tests/test_venue_surface.py now
+        # asserts every attribute engine.py reads exists on both venue classes.
+        self.maker_fee_bps = conf.maker_fee_bps
         self.cap_usd = conf.cap_usd
         self.orders_per_min = conf.orders_per_min
         self.last_traded_ts = 0.0

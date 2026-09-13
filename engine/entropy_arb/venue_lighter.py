@@ -188,6 +188,9 @@ class LighterVenue:
         # cannot see the account must block, not wave through.
         self.exposure: Optional[AccountSnapshot] = None
         self.fee_bps = conf.fee_bps
+        # See venue_hl for why this is here: B3's maker path reads it off the
+        # venue, and it lived only on VenueConf until 2026-09-13.
+        self.maker_fee_bps = conf.maker_fee_bps
         self.cap_usd = conf.cap_usd
         self.orders_per_min = conf.orders_per_min
         self.last_traded_ts = 0.0

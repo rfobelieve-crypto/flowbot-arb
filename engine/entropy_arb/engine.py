@@ -273,7 +273,13 @@ class Engine:
                         "PnL is claimed: decisions go to %s and that is all. / "
                         "影子模式：策略照跑，一张单都不送；不模拟成交、不虚构"
                         "持仓、不宣称损益。", cfg.shadow_csv)
-        if (self.hedge.kind == "hl"
+        # BOTH legs must be HL before either address is read. The old order
+        # checked only the hedge, so `entropy.venue: lighter` with an HL hedge
+        # (tradexyz) would call LighterVenue._query_address and raise --
+        # latent, because no config on this machine has that combination yet.
+        # Found 2026-09-13 by tests/test_venue_surface.py, which is the test
+        # the maker_fee_bps bug earned.
+        if (self.hedge.kind == "hl" and self.entropy.kind == "hl"
                 and self.entropy._query_address()
                 and self.entropy._query_address() == self.hedge._query_address()):
             self.hedge.include_core_equity = False  # shared account: count once

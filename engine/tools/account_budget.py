@@ -120,7 +120,7 @@ def read_cfg(name: str) -> dict:
 
 
 def accounts_of(job: dict, raw: dict) -> list:
-    """The margin pools this job touches, as (pool_id, per-process cap).
+    """The margin pools this job touches: [(pool_id, that leg's cap_usd), ...].
 
     A pool is what shares collateral, not what shares a login:
       HL        address + HIP-3 dex   (HIP-3 clearinghouses fund separately)
@@ -129,15 +129,22 @@ def accounts_of(job: dict, raw: dict) -> list:
     The address/index live in .env and are NOT read here -- this check never
     touches credentials. One account per (kind, deployment/dex) is the right
     granularity for a launch-time sum, because one machine has one .env.
+
+    **每一條腿帶的是它自己那個場館的 `max_position_usd`,不是
+    `max_gross_usd`。** 第一版 B3 加總的是 `max_gross_usd`(兩條腿的和),
+    而它要比的天花板是**單一帳戶**的 —— 兩條腿坐在兩個不共用抵押品的
+    帳戶上,把兩腿的和拿去比單一帳戶是單位錯(mistake.md 2026-09-03)。
     """
     ent = raw.get("entropy") or {}
+    hed = raw.get("hedge") or {}
     ev = str(ent.get("venue") or "hl").lower()
     dex = str(ent.get("dex") or "")
     a = ("lighter:%s" % ev) if ev.startswith("lighter") \
         else "hl:%s" % (dex or "core")
     h = job.get("hedge") or "?"
     b = ("lighter:%s" % h) if h.startswith("lighter") else "hl:xyz"
-    return [a, b]
+    return [(a, float(ent.get("max_position_usd") or 0.0)),
+            (b, float(hed.get("max_position_usd") or 0.0))]
 
 
 def main(argv=None) -> int:
@@ -213,37 +220,41 @@ def main(argv=None) -> int:
                 reds.append("B1 %s（%s）沒有設 risk.%s —— 引擎的 "
                             "REQUIRED_RISK 會拒絕啟動"
                             % (j["member"], j["config"], k))
-        for pool in accounts_of(j, raw):
-            pools.setdefault(pool, []).append(j)
+        for pool, leg_cap in accounts_of(j, raw):
+            pools.setdefault(pool, []).append((j, leg_cap))
+            if leg_cap <= 0:
+                reds.append("B1 %s（%s）在 %s 那條腿沒有 max_position_usd"
+                            % (j["member"], j["config"], pool))
 
     # ---- B2 / B3 逐帳戶 -------------------------------------------------
-    print("\n逐帳戶（只算 live）")
+    # **加總的單位是「那條腿在這個資金池上的 max_position_usd」**,不是
+    # max_gross_usd（兩條腿的和）—— 兩條腿坐在兩個不共用抵押品的帳戶上。
+    print("\n逐帳戶（只算 live；額度用該腿的 max_position_usd）")
     print("  %-22s %5s %14s %14s %s"
-          % ("帳戶（資金池）", "行程", "Σ逐行程上限", "帳戶天花板", "判定"))
-    for pool, js in sorted(pools.items()):
-        caps = {j.get("cap_account", 0.0) for j in js}
-        total = sum(j.get("cap_process", 0.0) for j in js)
+          % ("帳戶（資金池）", "行程", "Σ該腿上限", "帳戶天花板", "判定"))
+    for pool, entries in sorted(pools.items()):
+        caps = {j.get("cap_account", 0.0) for j, _ in entries}
+        total = sum(c for _, c in entries)
         verdict = "ok"
         if len(caps) > 1:
             verdict = "**B2 天花板不一致**"
             reds.append("B2 %s 上的 %d 個行程對 max_account_gross_usd 不同意："
                         "%s —— 一個資金池只能有一個天花板"
-                        % (pool, len(js),
+                        % (pool, len(entries),
                            ", ".join("%s=$%.0f" % (j["member"],
                                                    j.get("cap_account", 0.0))
-                                     for j in js)))
+                                     for j, _ in entries)))
         cap_a = max(caps) if caps else 0.0
         if cap_a > 0 and total > cap_a:
             verdict = "**B3 加起來超過**"
-            reds.append("B3 {}：Σ 逐行程 max_gross_usd ${:,.2f} 超過帳戶天花板 "
+            reds.append("B3 {}：Σ 該腿 max_position_usd ${:,.2f} 超過帳戶天花板 "
                         "${:,.2f}（{}）—— 每個行程都守得住自己的上限,"
                         "帳戶層仍然會爆"
                         .format(pool, total, cap_a,
-                                ", ".join("%s $%.0f" % (j["member"],
-                                                       j.get("cap_process", 0.0))
-                                          for j in js)))
+                                ", ".join("%s $%.0f" % (j["member"], c)
+                                          for j, c in entries)))
         print("  %-22s %5d %14s %14s %s"
-              % (pool, len(js), "${:,.0f}".format(total),
+              % (pool, len(entries), "${:,.0f}".format(total),
                  "${:,.0f}".format(cap_a) if cap_a else "—", verdict))
 
     ok = not reds
