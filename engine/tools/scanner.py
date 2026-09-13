@@ -114,7 +114,39 @@ SCALE_MIN = 0.5            # the same instrument (index vs ETF, etc.)
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "logs", "scan")
-CYCLE_SEC = 180
+# 180 -> 600 (2026-09-13). Operational, not analytical: this scanner alone was
+# 196 de-duplicated Lighter REST calls per cycle = **65/min, 24/7**, against
+# ~40/min from ten engines' reconcile. Lighter sits behind CloudFront+WAF,
+# which is PER IP and does not care that our account is Premium (the scanner
+# sends no credentials at all) -- and on 2026-09-13 that budget ran out: the
+# WS handshake started returning 403 and `lighter_tape` could not reconnect
+# for ~1.7 hours, losing unbackfillable tape. Existing connections were fine;
+# only NEW ones were refused.
+#
+# That failure mode is survivable for a research recorder and NOT survivable
+# for HMM: a live engine whose hedge-leg feed drops during a block cannot come
+# back, and it would be holding a position while it cannot see one leg.
+# Execution load must not lose its reconnect budget to a research scan.
+#
+# The analytical cost is ~0, and that is measured rather than argued: §1.39
+# put this scanner's own leg skew at **53 seconds** (the lighter block is a
+# serial loop with a sleep), so a 180-second grid was already finer than it
+# can resolve, and the injected fake spread sigma*sqrt(d/T) actually FALLS
+# from sqrt(53/180) to sqrt(53/600).
+#
+# ** THE ONE THING THIS CHANGES, AND IT IS A GATE **
+#   `frozen()` (spread_arb_paired.py, §1.40) is "both quotes unchanged between
+#   CONSECUTIVE SAMPLES", so its meaning is tied to this interval. Measured on
+#   the existing data by subsampling: median frozen 0.019 -> 0.004, and the
+#   FROZEN_CAP=0.25 gate goes from excluding 17/242 pairs to 9/242. The eight
+#   that flip from blocked to passing are ANTH, BOT, AAOI, XIAOMI, WEN, RGTI,
+#   BABA, ASML -- they are not newly tradeable, they are equally stale and
+#   merely sampled too coarsely to see it. GMX (Stage 1) is unaffected.
+#   Rows before and after this date measure different things: core principle 7
+#   (a column whose producing code changed meaning makes every earlier row an
+#   observation of something else). Any frozen-based verdict must either stay
+#   on pre-2026-09-13 rows or redefine frozen in SECONDS.
+CYCLE_SEC = 600
 UNIVERSE_REFRESH_SEC = 1800
 REQ_SPACING = 0.06          # be polite to Lighter's public REST
 HL_WORKERS = 4              # HL allows ~600 l2Book calls/min; this stays well under
