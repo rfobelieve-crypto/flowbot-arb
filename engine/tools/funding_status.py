@@ -91,6 +91,7 @@ def main(argv=None) -> int:
     e = env(os.path.join(ENGINE, ".env"))
     sym = args.symbol
     rows = []
+    unread: list = []      # 誰讀不到 —— 絕不補 0
 
     # ---------------------------------------------------------------- HL
     addr = e.get("HL_ACCOUNT_ADDRESS")
@@ -116,12 +117,24 @@ def main(argv=None) -> int:
     idx = e.get("LIGHTER_ACCOUNT_INDEX")
     if idx:
         try:
-            acct = (lighter_get("/api/v1/account",
-                                {"by": "index", "value": idx})
-                    .get("accounts") or [{}])[0]
+            # `or [{}]` 曾經在這裡,而它把「讀不到」變成一個**看起來合法的
+            # $0.00**：2026-09-13 這支對一個有 $88.78 的帳戶報了 $0.00,
+            # 因為 REST 回了 JSON 但不含 accounts（限流的錯誤體也是 JSON）。
+            # 一個回答「錢夠不夠」的工具報零,是它能犯的最糟的錯。
+            # 空輸出在這裡永遠不是合法狀態 —— 帳號索引是我們自己填的。
+            # （mistake.md 2026-09-11：空輸出必須 raise,不可以回空容器。）
+            j = lighter_get("/api/v1/account", {"by": "index", "value": idx})
+            accts = j.get("accounts") or []
+            if not accts:
+                raise RuntimeError(
+                    "帳戶 %s 查不到（回了 JSON 但沒有 accounts：%.200s）"
+                    % (idx, json.dumps(j, ensure_ascii=False)))
+            acct = accts[0]
+            obd = lighter_get("/api/v1/orderBookDetails")
             ob = {o["symbol"]: o for o in
-                  (lighter_get("/api/v1/orderBookDetails")
-                   .get("order_book_details") or [])}
+                  (obd.get("order_book_details") or [])}
+            if not ob:
+                raise RuntimeError("orderBookDetails 回了 0 個市場")
             o = ob.get(sym)
             mmf = (float(o["maintenance_margin_fraction"]) / 1e4) if o \
                 else float("nan")
@@ -132,9 +145,10 @@ def main(argv=None) -> int:
                              idle=0.0, idle_where="",
                              mmf=mmf, lev=lev))
         except Exception as exc:                             # noqa: BLE001
+            unread.append("Lighter mainnet")
             print("  **Lighter 讀不到：%s**" % exc)
-            print("  （WAF 挑戰會持續幾分鐘；下面的每腿上限只反映讀得到的"
-                  "那些場館，不是最終值。）\n")
+            print("  （WAF 挑戰會持續幾分鐘。下面**不會**幫它補一個 0 —— "
+                  "讀不到與帳上是零是兩件事，而這支工具的用途正好是分辨它們。）\n")
 
     print("標的 **%s**｜每所目標抵押品 $%.0f｜要撐住的逆向移動 %.0f%%\n"
           % (sym, args.target, 100 * args.buffer))
@@ -163,6 +177,11 @@ def main(argv=None) -> int:
 
     cap_now = min(now_caps) if now_caps else 0.0
     cap_full = min(full_caps) if full_caps else 0.0
+    if unread:
+        # 讀不到的場館不進最小值，所以下面那個上限是
+        # **上界不是結論** —— 說清楚，不要讓它看起來像完整的。
+        print("\n  **注意：%s 這次沒讀到，下面的上限只算了讀得到的"
+              "那些，是上界不是結論。**" % "、".join(unread))
     print("\n  **每腿名目上限 = 兩邊的較小值**（對沖部位在各場館眼裡都是單邊的）")
     print("     現在：**$%.0f/腿**｜補滿到每所 $%.0f 後：**$%.0f/腿**"
           % (cap_now, args.target, cap_full))
