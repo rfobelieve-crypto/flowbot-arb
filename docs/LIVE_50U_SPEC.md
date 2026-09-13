@@ -212,10 +212,39 @@ CLAUDE.md 的老規矩：**hard rules 寫進程式碼，不靠紀律**。這一�
       Lighter $18.89、**HL $0.00** —— 所以現在的綁束是抵押品，不是 size。
       轉帳由操作者執行。
 
-> **一個本規格沒寫、而掛單模式會撞到的結構問題**：引擎一次只允許一張
-> 掛單（`engine.py` `_scan_maker`：`if self._maker_open: return None`），
-> 而一個行程只跑一個 ticker。所以 N 個市場 = N 個行程，
+> **一個本規格沒寫、而掛單模式會撞到的結構問題（2026-09-13 發現，同日修掉）**：
+> 引擎一次只允許一張掛單（`engine.py` `_scan_maker`：`if self._maker_open:
+> return None`），而一個行程只跑一個 ticker。所以 N 個市場 = N 個行程，
 > **共用同一個 Lighter 帳號與同一個 HL 帳號**，而 `max_position_usd` /
 > `max_gross_usd` 是逐行程的 —— N 個行程各自守住上限，帳戶層可以是 N 倍。
 > flow_system 的 CLAUDE.md 已經為「kill switch 分不出虧損是誰造成的」
-> 付過兩次代價。**沒有中央曝險帳本之前，掛單模式上線的市場數是 1。**
+> 付過兩次代價，只是這次對手是我們自己的另一個行程。
+>
+> **B6 修法（已做、已反向證明）**，分三層而回應刻意不同：
+>
+> * `risk.max_account_gross_usd` —— **帳戶層**的 |部位×中價| 合計上限。
+>   `_headroom()` 會據此縮小或拒絕開新倉（預防）；真的超過了
+>   `_maybe_hedge()` **HALT**（偵測），訊息分開列出 `mine` 與 `others`。
+>   **不會去動別人的部位**（那是 admin_heal 的錯）。
+> * `risk.min_account_free_usd` —— 帳戶剩餘可用抵押品下限，
+>   **只擋開新倉、不 HALT**：危險的不是手上的對沖部位，是掛出一條
+>   沒有保證金可以對沖的腿，而那取決於還剩多少；抵押品會自己恢復。
+> * `tools/account_budget.py` —— **啟動前**把看門狗 `$Members` 裡所有
+>   live 成員的逐行程額度按資金池加總，Σ 超過帳戶天花板就紅；
+>   並掃出「會跑 live 卻不在註冊表裡」的啟動器（下一步會做的那種）。
+>
+> **帳本就是交易所**：沒有共享檔案、沒有鎖、**零額外 API 呼叫** ——
+> `fetch_position()` 兩邊本來就抓整個帳戶再濾掉只留一個市場
+> （HL 的 `marginSummary.totalNtlPos`、Lighter 的 `positions[].position_value`）。
+> 包在 `engine/entropy_arb/account.py`，掛在 `venue.exposure`。
+> 兩個開關都進了 `Engine.REQUIRED_RISK`：**live 沒設就拒絕啟動**，
+> 因為「0 = 關閉」只有在剛好一個 live 行程時才安全，而沒有任何東西
+> 會告訴你現在有幾個。
+>
+> 接線：看門狗每 5 分鐘跑一次並寫 `results/account_budget.json`，
+> flow_system 的新鮮度看板把它當 `json_flag` 讀（綠過一次、紅過一次）。
+> 測試 `engine/tests/test_account_risk.py` 21 個，引擎全套 157 個綠。
+>
+> **所以掛單模式上線的市場數是 1，理由是「第一次送真單」，不是
+> 「沒有帳戶層上限」。** 加第二個市場的前置條件：帳戶天花板已武裝、
+> 且啟動前加總是綠的。

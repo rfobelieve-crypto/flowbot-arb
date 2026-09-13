@@ -22,6 +22,7 @@ from typing import Optional
 
 import aiohttp
 
+from .account import AccountSnapshot, hl_snapshot
 from .book import OrderBook
 from .config import VenueConf
 from .feeds import HLBookFeed
@@ -75,6 +76,11 @@ class HLVenue:
         self.equity = None
         self.free = None
         self.start_equity = None
+        # Account-WIDE exposure, refreshed by fetch_position() out of the
+        # response it already fetches. None until the first reconcile; the
+        # engine treats None as "unknown" and fails closed when an account
+        # cap is configured (account.py).
+        self.exposure: Optional[AccountSnapshot] = None
         # Whether this leg's equity should include the CORE (dex "") bucket.
         # HIP-3 clearinghouses are funded separately -- USDC sitting in core
         # or spot cannot margin an io position until it is transferred in
@@ -545,10 +551,22 @@ class HLVenue:
         return eq, fr
 
     async def fetch_position(self) -> float:
+        """This market's signed size -- and, as a side effect, what the WHOLE
+        account carries.
+
+        The response already holds every market on this clearinghouse and the
+        loop below throws all of it away. `self.exposure` keeps the aggregate
+        so the engine can cap the ACCOUNT, not just this process: every other
+        cap here is per process, and N processes share one account. Zero extra
+        API calls; see entropy_arb/account.py for why that is the whole point.
+        """
         addr = self._query_address()
         assert addr is not None
         st = await self._info({"type": "clearinghouseState", "user": addr,
                                "dex": self.conf.hl_dex})
+        self.exposure = hl_snapshot(
+            st, coin=self.coin,
+            account_id=f"hl:{addr}:{self.conf.hl_dex or 'core'}")
         for ap in st.get("assetPositions") or []:
             pos = ap.get("position") or {}
             if pos.get("coin") == self.coin:

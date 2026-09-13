@@ -60,3 +60,30 @@ $line = if ($dead.Count -eq 0) { "$stamp UTC  all $($Members.Count) alive" }
         else                  { "$stamp UTC  RELAUNCHED: $($dead -join ',')" }
 Add-Content -Path $Log -Value $line -Encoding UTF8
 Write-Output $line
+
+# B6 (2026-09-13): add up the per-process risk budgets of everything in
+# $Members that runs LIVE, grouped by the account each leg settles on.
+# Every ceiling inside the engine (cap_usd, max_gross_usd) is per process, and
+# one process trades one symbol -- so N markets means N processes sharing one
+# Lighter account and one HL account, and N processes each honouring $1,000
+# can put $5,000 on one account. This is the launch-time half of that check;
+# the runtime half reads the account back from the venue itself
+# (engine/entropy_arb/account.py). It runs HERE because this file is the
+# registry of what the machine launches, and because a guard nobody schedules
+# is a guard that does not exist (mistake.md 2026-09-01 / 2026-09-11).
+#
+# It writes results/account_budget.json, which flow_system's freshness board
+# reads as a json_flag -- so the VERDICT is what turns red, and a crash here
+# turns red too because the flag goes stale. The exit code is not the
+# judgement (mistake.md 2026-08-26).
+$Eng = 'C:\Users\rfo\Desktop\flowbot\arb\engine'
+try {
+  $out = & python (Join-Path $Eng 'tools\account_budget.py') 2>&1
+  $bad = @($out | Where-Object { "$_" -like '*RED*' -or "$_" -like '*紅*' })
+  $budline = if ($bad.Count -eq 0) { "$stamp UTC  account budget OK" }
+             else { "$stamp UTC  account budget RED: $($bad -join ' | ')" }
+} catch {
+  $budline = "$stamp UTC  account budget CHECK FAILED: $($_.Exception.Message)"
+}
+Add-Content -Path $Log -Value $budline -Encoding UTF8
+Write-Output $budline

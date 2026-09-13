@@ -27,6 +27,7 @@ try:
 except ImportError:
     from websockets import connect as ws_connect  # type: ignore
 
+from .account import AccountSnapshot, lighter_snapshot
 from .book import OrderBook
 from .config import VenueConf
 from .feeds import WS_KWARGS, LighterBookFeed
@@ -181,6 +182,11 @@ class LighterVenue:
         self.equity = None
         self.free = None
         self.start_equity = None
+        # Account-WIDE exposure, refreshed by fetch_position() out of the
+        # response it already fetches (see entropy_arb/account.py). None until
+        # the first reconcile, and None means "unknown" -- an account cap that
+        # cannot see the account must block, not wave through.
+        self.exposure: Optional[AccountSnapshot] = None
         self.fee_bps = conf.fee_bps
         self.cap_usd = conf.cap_usd
         self.orders_per_min = conf.orders_per_min
@@ -551,9 +557,19 @@ class LighterVenue:
                 float(acct.get("available_balance") or 0.0))
 
     async def fetch_position(self) -> float:
+        """This market's signed size -- and, as a side effect, what the WHOLE
+        account carries (account.py: every other cap here is per process,
+        and N processes share one account). No extra request: the loop below
+        already walks every market in the response and keeps one.
+        """
         acct = await self._account()
         if acct is None:
             raise RuntimeError(f"[{self.name}] account not found")
+        c = self.conf.lighter_creds
+        self.exposure = lighter_snapshot(
+            acct, market_id=self.market_id,
+            account_id="%s:%s" % (self.profile.name,
+                                  c.account_index if c else "?"))
         for p in acct.get("positions") or []:
             if int(p.get("market_id", -1)) == self.market_id:
                 return float(p.get("sign") or 1.0) * float(p.get("position") or 0.0)

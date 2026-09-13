@@ -183,6 +183,28 @@ class Config:
     # venues. cap_usd is PER VENUE, so a config typo that scales size by 10x
     # passes every per-venue check. This is the backstop for that.
     max_gross_usd: float
+    # B6 (2026-09-13): and max_gross_usd is PER PROCESS. One process trades one
+    # symbol and holds at most one resting quote, so N markets means N
+    # processes sharing one Lighter account and one HL account -- five
+    # processes each honouring $1,000 can put $5,000 on one account, and every
+    # guard above is computed from self.venues (this process's two legs).
+    #
+    # This is the ceiling on what the ACCOUNT carries across ALL markets, read
+    # from the venue itself (entropy_arb/account.py; zero extra API calls).
+    # unexplained_position_halt already catches a second bot trading the SAME
+    # market; this catches one trading a different market on the same account,
+    # which leaves our own position perfectly explained.
+    # 0 = disabled, and disabled is only safe with exactly one live process.
+    max_account_gross_usd: float
+    # B6: the floor on free collateral the ACCOUNT must still have before this
+    # process opens anything new. Separate from the cap above because the
+    # danger is not the hedged book we hold, it is posting a leg whose hedge
+    # cannot be margined -- and that depends on what is LEFT, not on what is
+    # used. Blocks new opens only: hedging, flattening and self-rescue never
+    # stop (a margin squeeze is exactly when flattening matters most), and it
+    # does not HALT because free collateral recovers by itself and a halt
+    # needs a human. 0 = disabled.
+    min_account_free_usd: float
     # B4: books stale this many evaluations in a row -> halt. "Stale forever"
     # currently looks identical to "quiet market", which is a silent-failure
     # shape (the venue_down path only covers position-fetch failures, not a
@@ -306,6 +328,8 @@ _SCHEMA: Dict[str, Any] = {
         "max_net_base": float,      # B4/G1: hard cap on |leg A + leg B|
         "max_daily_loss_usd": float,  # B4: session MTM floor, halts on breach
         "max_gross_usd": float,       # B4: absolute sum |pos x mid| ceiling
+        "max_account_gross_usd": float,  # B6: the same, for the whole ACCOUNT
+        "min_account_free_usd": float,   # B6: stop opening below this free
         "max_consecutive_stale": int,  # B4: stale books N times in a row -> halt
         "halt_flatten_attempts": int,  # B4: reduce-only hedges allowed AFTER halt
         "max_edge_bps": float,        # B4: refuse an edge too good to be true
@@ -454,6 +478,22 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     max_gross_usd = float(_get(raw, "risk", "max_gross_usd", 0.0))
     if max_gross_usd < 0:
         raise ConfigError("risk.max_gross_usd must be >= 0 (0 disables)")
+    max_account_gross_usd = float(
+        _get(raw, "risk", "max_account_gross_usd", 0.0))
+    if max_account_gross_usd < 0:
+        raise ConfigError("risk.max_account_gross_usd must be >= 0 "
+                          "(0 disables)")
+    # An account ceiling BELOW this process's own ceiling is a config that
+    # cannot be satisfied: our own legs alone would breach it. Refuse at load
+    # rather than halt on the first fill.
+    if 0 < max_account_gross_usd < max_gross_usd:
+        raise ConfigError(
+            f"risk.max_account_gross_usd ${max_account_gross_usd:,.2f} is "
+            f"below risk.max_gross_usd ${max_gross_usd:,.2f} — the account "
+            f"ceiling must leave room for this process's own ceiling")
+    min_account_free_usd = float(_get(raw, "risk", "min_account_free_usd", 0.0))
+    if min_account_free_usd < 0:
+        raise ConfigError("risk.min_account_free_usd must be >= 0 (0 disables)")
     max_consecutive_stale = int(_get(raw, "risk", "max_consecutive_stale", 0))
     if max_consecutive_stale < 0:
         raise ConfigError("risk.max_consecutive_stale must be >= 0 (0 disables)")
@@ -605,6 +645,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         max_net_base=max_net_base,
         max_daily_loss_usd=max_daily_loss_usd,
         max_gross_usd=max_gross_usd,
+        max_account_gross_usd=max_account_gross_usd,
+        min_account_free_usd=min_account_free_usd,
         max_consecutive_stale=max_consecutive_stale,
         halt_flatten_attempts=halt_flatten_attempts,
         max_edge_bps=max_edge_bps,

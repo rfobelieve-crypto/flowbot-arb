@@ -437,10 +437,72 @@ class Engine:
             base = self.cfg.lower_bps - self.cfg.midline_bps
         return base + self._inv_add_bps(buy, sell)
 
+    # How stale an account snapshot may be before it counts as unknown, as a
+    # multiple of reconcile_sec. The snapshot rides on fetch_position(), so a
+    # venue whose position fetch is failing stops refreshing it -- and a stale
+    # snapshot says "plenty of room" for as long as nobody looks. _venue_down
+    # only blocks trading after 3 consecutive failures; this covers the window
+    # before that, and it covers a venue that answers slowly rather than not
+    # at all. (mistake.md 2026-09-11: automation that can place orders must
+    # not act on state it cannot currently see.)
+    ACCOUNT_STALE_MULT = 4.0
+
+    def _account_headroom(self, v, why: list) -> float:
+        """How much MORE notional this account may take, from exchange truth.
+
+        Returns +inf when no account limit is configured -- `min()` in
+        _headroom then ignores it, so the default behaviour is byte-identical
+        to before B6. Appends a human reason to `why` whenever it binds, so
+        the skip line says which account and how much of it is not ours.
+        """
+        cfg = self.cfg
+        cap = cfg.max_account_gross_usd
+        floor = cfg.min_account_free_usd
+        if cap <= 0 and floor <= 0:
+            return float("inf")
+        snap = v.exposure
+        if snap is None:
+            why.append(f"{v.name}: account exposure not read yet")
+            return 0.0
+        age = snap.age_sec()
+        if age > self.ACCOUNT_STALE_MULT * cfg.reconcile_sec:
+            why.append(f"{v.name}: account exposure {age:.0f}s old "
+                       f"(> {self.ACCOUNT_STALE_MULT:.0f}x reconcile)")
+            return 0.0
+        room = float("inf")
+        if floor > 0 and snap.free_usd < floor:
+            why.append(f"{snap.account_id}: free ${snap.free_usd:,.2f} below "
+                       f"min_account_free_usd ${floor:,.2f}")
+            return 0.0
+        if cap > 0:
+            left = cap - snap.gross_usd
+            if left < room:
+                room = left
+                if left <= 0:
+                    why.append(
+                        f"{snap.account_id}: account gross "
+                        f"${snap.gross_usd:,.2f} at/over "
+                        f"max_account_gross_usd ${cap:,.2f} "
+                        f"(${snap.others_usd:,.2f} of it is NOT this process)")
+        return room
+
     def _headroom(self, buy, sell, ref_px: float) -> float:
+        """Room for new notional: this process's caps AND the account's.
+
+        The two per-venue terms are this process's own book. The two account
+        terms are what every copy of this process put on the same account
+        together -- without them, N processes each honouring cap_usd and
+        max_gross_usd can still overload one account, because both of those
+        are computed from self.venues. See entropy_arb/account.py.
+        """
         hb = buy.cap_usd - buy.position * ref_px
         hs = sell.cap_usd + sell.position * ref_px
-        return min(hb, hs)
+        why: list = []
+        ab = self._account_headroom(buy, why)
+        as_ = self._account_headroom(sell, why)
+        if why:
+            self._skiplog("account limit binds: %s", "; ".join(why))
+        return min(hb, hs, ab, as_)
 
     def _plan(self, buy, sell, cap_notional: float):
         return plan_arb(
@@ -1589,6 +1651,17 @@ class Engine:
         ("max_consecutive_stale", "stale-book evaluations before HALT"),
         ("max_edge_bps", "premium above which the BOOK is assumed wrong"),
         ("vol_max_move_bps", "peak-to-trough move that pauses new exposure"),
+        # B6 (2026-09-13). Required, not optional, and for a reason that is
+        # not about this process: every switch above is computed from
+        # self.venues, so N copies of this engine each passing all of them can
+        # still overload the one account they share. Leaving this at 0 is only
+        # safe when exactly one live process exists, and nothing in a running
+        # system shows you how many there are.
+        ("max_account_gross_usd",
+         "total |position x mid| ceiling for the whole ACCOUNT (all markets, "
+         "all processes)"),
+        ("min_account_free_usd",
+         "free collateral the ACCOUNT must keep before opening anything new"),
     )
 
     def _require_armed_risk_block(self) -> None:
@@ -1835,6 +1908,27 @@ class Engine:
                 self._risk_halt(f"gross exposure ${g:,.2f} exceeds "
                                 f"max_gross_usd ${gross_cap:,.2f}")
                 return
+        # B6 (2026-09-13): the same ceiling one level up -- the ACCOUNT, across
+        # every market, including the ones other processes trade. _headroom()
+        # already refuses to OPEN past this; reaching it here means prevention
+        # failed, and the three ways it can are another process, a manual
+        # trade, or a price move. None of them are ours to undo: the engine
+        # stops opening and still flattens its OWN imbalance via self-rescue.
+        # Zeroing or reducing a position this process did not open is the
+        # admin_heal mistake (flow_system mistake.md 2026-06-07).
+        acct_cap = self.cfg.max_account_gross_usd
+        if acct_cap > 0:
+            for v in self.venues.values():
+                s = v.exposure
+                if s is not None and s.gross_usd > acct_cap:
+                    self._risk_halt(
+                        f"ACCOUNT gross ${s.gross_usd:,.2f} exceeds "
+                        f"max_account_gross_usd ${acct_cap:,.2f} on "
+                        f"{s.account_id} — ${s.mine_usd:,.2f} is this "
+                        f"process, ${s.others_usd:,.2f} is NOT (another "
+                        f"engine process, a manual trade, or a price move). "
+                        f"{s.markets} market(s) carry a position")
+                    return
         floor = self.cfg.max_daily_loss_usd
         if floor > 0:
             pnl = self.session_pnl()
