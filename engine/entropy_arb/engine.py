@@ -914,6 +914,30 @@ class Engine:
         if not (self._venue_rate_ok(maker_v) and self._venue_rate_ok(taker_v)):
             self._skiplog("maker quote deferred: venue order budget exhausted")
             return None
+        # Never refire into books that predate the venue's own last trade --
+        # the guard _scan has, and the one this docstring already claimed was
+        # here. Live never showed it missing: a resting quote keeps
+        # `_maker_open` set and this function returns at the top. Shadow rests
+        # nothing, so `_maker_open` empties on the same turn and the identical
+        # plan was re-decided every loop pass -- 4,394 quote decisions in 90
+        # seconds on GMX (~49/s) against a live cadence of one per
+        # maker_timeout_sec. A rehearsal that fires 1400x faster than the real
+        # thing is not a rehearsal (2026-09-05, then again 2026-09-13).
+        #
+        # Live behaviour changes in exactly one case: straight after a fill,
+        # where maker_v.last_traded_ts is stamped (the only place live stamps
+        # it) and we now wait for both books to move before quoting again.
+        # That is what the taker path has always done, and declining to quote
+        # into a book that has not updated since our own fill is the whole
+        # point of the guard.
+        #
+        # Deliberately LAST: the freshness check above must keep running every
+        # pass so `_stale_streak` keeps counting. Putting this before it would
+        # silence the stale accounting -- fixing one blind spot by making
+        # another.
+        if (maker_v.book.last_update_ts <= maker_v.last_traded_ts
+                or taker_v.book.last_update_ts <= taker_v.last_traded_ts):
+            return None
         best = None
         for maker_is_buy in (True, False):
             # posting a bid on venue M means we BUY on M and SELL on the

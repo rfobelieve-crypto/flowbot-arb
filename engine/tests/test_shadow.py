@@ -152,3 +152,33 @@ def test_shadow_does_not_refire_faster_than_live():
     run(go())
     assert eng.shadow_decisions == 1, \
         f"the same plan was decided {eng.shadow_decisions} times on one book"
+
+
+def test_shadow_maker_does_not_refire_faster_than_live():
+    """Same property as the test above, on the MAKER path.
+
+    The one above only ran mode="taker", and HMM runs mode="maker" -- so the
+    path this whole line depends on was never covered. Measured on the real
+    engine 2026-09-13: 4,394 quote decisions in 90 seconds (~49/s) against a
+    live cadence of one quote per maker_timeout_sec (20s). 1400x.
+
+    Why live never showed it: a resting quote keeps `_maker_open` set, and
+    `_scan_maker` returns None while it is. In shadow nothing rests, so
+    `_maker_open` empties on the same turn and there was nothing left to
+    space the decisions out -- `_scan_maker` was missing the one guard
+    `_scan` has ("never refire into books that predate the venue's own last
+    trade"), while its own docstring claimed "Same guards as _scan".
+    """
+    eng = shadow_engine()
+    eng.entropy.set_book(100.00, 100.20)
+    eng.hedge.set_book(99.90, 100.00)
+
+    async def go():
+        import time
+        now = time.time()
+        eng._scan_maker(now)                       # arms
+        for _ in range(20):                        # books do not move
+            await eng._evaluate()
+    run(go())
+    assert eng.shadow_decisions <= 1, \
+        f"the same quote was decided {eng.shadow_decisions} times on one book"
