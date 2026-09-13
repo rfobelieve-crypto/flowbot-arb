@@ -134,7 +134,13 @@ VENUES: dict[str, dict] = {
     "bitget": {
         "taker_bps": 6.0, "maker_bps": 2.0, "rebate": 0.50, "verified": True,
         "note": "Bitget publishes takerFeeRate per contract (0.0006 = 6 bps). "
-                "Rebate 50% stated by the operator 2026-09-03.",
+                "Rebate 50% stated by the operator 2026-09-03, and "
+                "REAFFIRMED as permanent by the operator 2026-09-13 "
+                "when asked whether it could lapse. So it is a "
+                "BASELINE, not a promotion: flow_system TODO 1.40 "
+                "measured that 4 of its 9 live spread-arb candidates "
+                "exist only because of it (9/9 with rebate, 5/9 "
+                "without), and the operator has taken that dependency.",
     },
     "binance": {
         "taker_bps": 5.0, "maker_bps": 2.0, "rebate": 0.0, "verified": False,
