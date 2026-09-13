@@ -38,6 +38,10 @@ $Members = [ordered]@{
   'HYPE'    = @('--symbol HYPE ', 'run_recorder_HYPE.bat')
   'GOLD_LL' = @('--symbol XAU ',  'run_recorder_GOLD_LL.bat')
   'NVDA_LL' = @('--symbol NVDA ', 'run_recorder_NVDA_LL.bat')
+  # MET —— HMM 候選的 record-only 錄製器（2026-09-14，TODO §1.41b）。
+  # 它要回答 GMX 死掉的那一關：premium 會不會震盪（判準在
+  # arblib/hmm_screen.py，跑之前凍結）。**record-only，不送單。**
+  'MET'     = @('--symbol MET ',  'run_recorder_MET.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
   'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
   # 'scanner' 2026-09-13 退出這張表 —— 掃描器搬到 Railway 了（docs/DEPLOY.md §6）。

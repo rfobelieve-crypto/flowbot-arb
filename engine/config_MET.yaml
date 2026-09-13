@@ -1,0 +1,157 @@
+# MET —— HMM 候選的 record-only 錄製器（2026-09-14，TODO §1.41b）
+#
+# 為什麼是 MET：它是 markout 篩選裡唯一同時滿足四件事的：
+#   對沖窗淨值   +18.7 bps（mo_no_1.0 23.6 − 費用 4.9），n=1,445
+#   **跨尺度穩定** 1s 23.6 / 5s 19.0 / 60s 23.1 —— 不像 AI 在 60s 崩成 −45.6
+#                 「穩定」比「高」值錢，那是非毒性的定義
+#   日成交額     Lighter $128,201（GMX 是 $9,534，差 13.4 倍）
+#   對沖腿       HL core MET，價格偏離 0.49%（不是同名不同資產）
+#
+# **而它要回答的是 GMX 死掉的那一關**：premium 會不會震盪。
+# GMX 173 分鐘裡 96% 為負 -> 只能單邊賣 -> 4 張滿了就卡住。
+# 判準在 arblib/hmm_screen.py，跑之前就凍結了：
+#   G1 掛單腿半價差 >= 5 bps ／ G2 少數側可做的分鐘 >= 20%
+#   G3 有成交的分鐘 >= 30%
+#
+# 市場參數（2026-09-14 查 API）：
+#   Lighter  market_id 95、min $10、size 1 位小數、price 5 位小數
+#   HL core  szDecimals 0、maxLeverage 3x（mmf 16.7%）
+#
+# **這是 record-only。** 翻成任何會送單的模式要另外一次 override。
+
+entropy:                      # 吃單對沖腿
+  dex: ''                     # HL 主場；MET 在 core（2026-09-14 查證）
+  symbol: MET
+  taker_fee_bps: 4.5          # arblib/fees.py，HL 基礎級 0.045%
+  maker_fee_bps: 1.5
+  max_position_usd: 60        # 見下面 risk 的推導
+  max_orders_per_min: 30
+
+hedge:                        # 掛單腿（execution.maker_venue: hedge）
+  symbol: MET
+  taker_fee_bps: 2.8          # Lighter PREMIUM
+  maker_fee_bps: 0.4          # ← 這條腿掛單，這才是我們實際付的
+  max_position_usd: 60
+  max_orders_per_min: 60
+
+thresholds:
+  midline_bps: 0.0
+  upper_bps: 15.0             # 量到的毛邊際 +27.17；門檻留一半以上的餘裕
+  lower_bps: 15.0
+
+sizing:
+  take_fraction: 0.5
+  max_order_notional_usd: 15  # **暫用 GMX 的值，MET 的深度還沒量。**
+                              # record-only 用不到它；翻 live 之前必須
+                              # 從 minutes.csv 的 h_ask_d5/h_bid_d5 重推，
+                              # 否則就是在假設一個沒量過的深度。
+  min_order_notional_usd: 10  # 兩個場館的最小單都是 $10（API 查證）
+
+inventory:
+  scale_bps: 10.0             # 庫存偏斜：一邊累積就把那側的報價推遠
+  floor_frac: 0
+
+execution:
+  mode: maker
+  maker_venue: hedge          # 掛在 hedge 腿 = Lighter；吃單對沖到 entropy = HL
+  maker_timeout_sec: 20.0
+  cancel_timeout_sec: 3.0     # 實測取消往返中位 49.9 ms / p90 54.7
+  maker_poll_sec: 0.25
+  maker_min_edge_bps: 5.0     # 邊際衰退到這裡就撤掉那張報價
+  premium_persist_sec: 2.0
+  cooldown_sec: 0.0
+  # 2026-09-13：10.0 -> 30.0，而這個數字是量出來的不是猜的。
+  #
+  # staleness_sec 比的是 book.alive_ts，而 alive_ts 由**任何入站訊框**蓋
+  # （feeds.py 的 touch() 在型別分派之前）。它的語意是「只有死掉的訂閱才算
+  # 過期，安靜的市場不算」—— 而在 GMX 上那句話原本不成立：
+  #
+  #   HL 的 feed 每 5 秒主動 ping，所以它建構上每 ≤5 秒有一個訊框
+  #   Lighter 的 feed 只被動回 pong  ->  完全看市場臉色
+  #   GMX 在 Lighter 的日成交額 $9,534，頂檔中位 32 秒才動一次
+  #
+  # 實測（10 分鐘，同一條 WS，兩段）：
+  #   被動          max 訊框空檔 20.10s，>10s 佔 24.6%
+  #   每 5 秒 ping  max 訊框空檔 12.08s，>10s 佔  1.0%
+  # 而 shadow 實跑的後果：22:44 開機 -> 22:59 HALT，十五分鐘用完五個 episode。
+  #
+  # 所以兩件事一起做：下面打開 ws_ping_sec，門檻放到 30。
+  # 30 的由來：有心跳之後最差 12.1 秒（約每六次 ping 有一次沒被回，所以要
+  # 留兩次的餘裕），30 秒 = 連續四次以上沒回 = 真的有事。
+  #
+  # 放寬它**沒有**製造盲點 —— 真正的斷線偵測本來就不靠這個數字：
+  #   websockets 的 ping_interval 50 / ping_timeout 20  -> 連線 ≤70s 內被關掉
+  #   venue_probe_sec 30                                -> REST 側獨立偵測
+  # 這個數字實際在擋的是「拿一個可能已經錯的價格去下單」，而在一個 32 秒才
+  # 動一次的簿口上，10 秒前的價格就是現在的價格。
+  staleness_sec: 30.0
+  # feed 每隔這麼久主動要一個訊框（0 = 關）。**預設是關的**，因為
+  # recorder.py:341 用 is_fresh() -> alive_ts 數 samples，全域打開會膨脹
+  # 九支錄製器的樣本數 = 在進行中的量測底下換尺。這裡只對 HMM 打開。
+  # 5.0 是照抄 HL feed 的 ping_sec，實測伺服器回 pong 中位 38 毫秒。
+  ws_ping_sec: 5.0
+  reconcile_sec: 15.0
+  settle_timeout_sec: 10.0
+  leg_slippage_bps: 50.0
+  hedge_slippage_bps: 20.0
+  net_tolerance_base: 0.01
+  max_consecutive_errors: 3
+  rate_limit_pause_sec: 10.0
+  venue_probe_sec: 30.0
+  http_keepalive_sec: 10.0
+
+risk:
+  # ---- 逐行程（這兩條是 B6 之前就有的）--------------------------------
+  max_net_base: 68.0          # **基礎單位，所以它隨價格縮放 —— 複製設定最容易
+                              # 死在這裡。** GMX 的 2.0 在 $7.8 上是 $15.6 的
+                              # 裸曝險容忍；MET 是 $0.234，同一個 2.0 只有
+                              # $0.47，每一筆成交都會踩線。
+                              # 68 = 一張單的量（$15 / $0.234 = 64）加一點餘裕。
+                              # 這個數要擋的是「對沖沒成功」，所以它的尺度是
+                              # 一張單，不是總部位。
+  max_daily_loss_usd: 10.0
+  max_gross_usd: 130.0        # 兩條腿的和（60+60）＋中價漂移餘裕
+
+  # ---- 逐帳戶（B6，2026-09-13）----------------------------------------
+  # **這一條是 PER ACCOUNT，不是兩腿的和** —— 兩條腿坐在兩個不共用抵押品
+  # 的帳戶上（HL core 與 Lighter mainnet），所以它要放得下的是**一條腿**的
+  # max_position_usd。
+  #
+  # 抵押品實況（tools/funding_status.py，2026-09-13）：
+  #   HL core          $98.30   維持率 16.7%（GMX 3x）  撐 40% 逆向 → $173/腿
+  #   Lighter mainnet  $88.78   維持率 12.0%（GMX 5x）  撐 40% 逆向 → $171/腿
+  # 抵押品撐得住 $170，而這裡刻意寫 70。
+  #
+  # **70 是在用設定強制 Stage 1 的「單一市場」紀律**：60（我們這條腿）＋
+  # 漂移餘裕。第二個 live 行程一上來，account_budget.py 的 B3 就會紅
+  # （Σ 逐腿上限 120 > 70），而那比寫在散文裡的「不准加市場」硬得多。
+  # 要加第二個市場 = 要改這個數字 = 要重新想一次，那正是我們要的摩擦。
+  max_account_gross_usd: 70.0
+  # 帳戶要保留的可用抵押品。開一條 $60 的腿，HL 初始保證金 33.3% = $20、
+  # Lighter 20% = $12，所以 25 之下就不該再開新的。
+  # 只擋開新倉，對沖與平倉永不停止。
+  min_account_free_usd: 25.0
+
+  # ---- 其餘既有開關 ----------------------------------------------------
+  max_consecutive_stale: 20
+  max_stale_episodes: 5
+  halt_flatten_attempts: 3
+  max_edge_bps: 300.0         # 帶量到 27 bps；幾百 bps 是簿口壞了不是市場大方
+  vol_window_sec: 60.0
+  vol_max_move_bps: 300.0
+  vol_cooldown_sec: 60.0
+  unexplained_position_halt: true   # 部位在我們沒送單時動了 = 清算／ADL／
+                                    # 別人在同一個帳戶上 —— 三者都要停
+
+logging:
+  dashboard: false
+  level: INFO
+  file: logs/MET/engine.log
+  trades_csv: logs/MET/trades.csv
+  # maker_csv / shadow_csv / status_json 由 config.py 依 trades_csv 推導，
+  # 落在 logs/MET/ 之下。status.json 帶扁平的 {ok, reason}，HMM 上線那天
+  # 要把它加進 flow_system 的 freshness（§1.41 下一步）。
+
+recorder:
+  enabled: true
+  csv: logs/MET/minutes.csv
