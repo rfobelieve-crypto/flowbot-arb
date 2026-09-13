@@ -94,7 +94,10 @@ execution:
   settle_timeout_sec: 10.0
   leg_slippage_bps: 50.0
   hedge_slippage_bps: 20.0
-  net_tolerance_base: 0.01
+  # **HL 的 MET 是 szDecimals 0 —— 最小交易單位是 1 整顆（$0.234）。**
+  # 所以兩腿的殘餘量子是 1 顆,而舊值 0.01（$0.0023）**永遠滿足不了**。
+  # 2 顆 = $0.47 = 兩個量子。
+  net_tolerance_base: 2.0
   max_consecutive_errors: 3
   rate_limit_pause_sec: 10.0
   venue_probe_sec: 30.0
@@ -102,7 +105,12 @@ execution:
 
 risk:
   # ---- 逐行程（這兩條是 B6 之前就有的）--------------------------------
-  max_net_base: 68.0          # **基礎單位，所以它隨價格縮放 —— 複製設定最容易
+  # **必須 < 一張單。** 它擋的是「對沖完全失敗」,而那時 net 正好是一張單
+  # （engine.py:1478 —— `_maybe_hedge` 在報價結算後才查,立即對沖已經試過）。
+  # config.py:479 的設計意圖：tight enough that a single stuck leg trips it。
+  # 2026-09-14 改正：舊值容忍 1.06 張單 >= 1,**對沖全滅時它不會跳**。
+  # 新值 = 16.0 顆 = $3.74 = 0.25 張單 = 16 個殘餘量子（兩腿步長取粗的那個）。
+  max_net_base: 16.0          # **基礎單位，所以它隨價格縮放 —— 複製設定最容易
                               # 死在這裡。** GMX 的 2.0 在 $7.8 上是 $15.6 的
                               # 裸曝險容忍；MET 是 $0.234，同一個 2.0 只有
                               # $0.47，每一筆成交都會踩線。

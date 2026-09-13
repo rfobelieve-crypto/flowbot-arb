@@ -81,7 +81,8 @@ execution:
   settle_timeout_sec: 10.0
   leg_slippage_bps: 50.0
   hedge_slippage_bps: 20.0
-  net_tolerance_base: 0.01
+  # 兩腿的殘餘量子都是 0.01 顆（$0.078）；舊值剛好等於一個量子 = 零餘裕。
+  net_tolerance_base: 0.02
   max_consecutive_errors: 3
   rate_limit_pause_sec: 10.0
   venue_probe_sec: 30.0
@@ -89,7 +90,12 @@ execution:
 
 risk:
   # ---- 逐行程（這兩條是 B6 之前就有的）--------------------------------
-  max_net_base: 2.0           # GMX 現價 ~$7.8，2 顆 ≈ $16 的裸曝險上限
+  # **必須 < 一張單。** 它擋的是「對沖完全失敗」,而那時 net 正好是一張單
+  # （engine.py:1478 —— `_maybe_hedge` 在報價結算後才查,立即對沖已經試過）。
+  # config.py:479 的設計意圖：tight enough that a single stuck leg trips it。
+  # 2026-09-14 改正：舊值容忍 1.04 張單 >= 1,**對沖全滅時它不會跳**。
+  # 新值 = 0.5 顆 = $3.90 = 0.26 張單 = 50 個殘餘量子（兩腿步長取粗的那個）。
+  max_net_base: 0.5
   max_daily_loss_usd: 10.0
   max_gross_usd: 130.0        # 兩條腿的和（60+60）＋中價漂移餘裕
 

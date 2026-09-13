@@ -150,8 +150,13 @@ def test_recording_family_configs_have_no_ws_ping():
     Not a style check -- `samples` is the §0.75 family's own denominator.
     """
     import glob
+    # **具名清單,不是排除一個檔名。** 這一關要守的是「凍結的那九支不變」,
+    # 所以每加一份 HMM 設定就要在這裡加一行 —— 那個摩擦是刻意的:
+    # 它逼人回答「這份設定是 HMM 候選,還是我不小心動到了錄製家族」。
+    # 2026-09-14 加 MET 時這一關紅了,而那正是它存在的理由。
+    hmm = {"config_HMM_GMX.yaml", "config_MET.yaml"}
     changed = [os.path.basename(p)
                for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
-               if os.path.basename(p) != "config_HMM_GMX.yaml"
+               if os.path.basename(p) not in hmm
                and "ws_ping_sec" in io.open(p, encoding="utf-8").read()]
     assert not changed, f"recording configs gained ws_ping_sec: {changed}"
