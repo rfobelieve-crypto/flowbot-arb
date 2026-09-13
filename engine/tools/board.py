@@ -173,6 +173,14 @@ def render(pairs: list, hours: float) -> str:
         u3 = mk3.get("usd_bps")
         m3_cls = ("" if not mk3.get("n") else
                   "ok" if (u3 or 0) > -1.0 else "bad")
+        # M5：行情過期。FLAT 時引擎只暫停並計次，第 N 次才真的 HALT ——
+        # 所以「還沒 HALT」不等於「沒事」，爬升本身就是訊號。
+        # 0 不著色（沒開始 != 不及格）；到達上限前一格就紅，因為那時還來得及
+        # 調 staleness_sec，HALT 之後就只剩人工重啟。
+        ep = c.get("stale_episodes", 0)
+        ep_lim = c.get("stale_episode_limit") or 0
+        m5_cls = ("" if not ep else
+                  "bad" if (ep_lim and ep >= ep_lim - 1) else "warn")
         return (f"<tr><td><b>{p['pair']}</b></td>"
                 f"<td class=n>{rested}</td><td class=n>{fills}</td>"
                 f"<td class=n>{c.get('quotes_cancelled', 0)}</td>"
@@ -185,6 +193,8 @@ def render(pairs: list, hours: float) -> str:
                 f"<td class='n {m3_cls}'>{fmt(mk3.get('usd_bps'), 2)}"
                 f"<span class=sub> ({mk3.get('n', 0)}"
                 f"+{mk3.get('pending', 0)}p)</span></td>"
+                f"<td class='n {m5_cls}'>{ep}/{ep_lim or chr(8734)}"
+                f"<span class=sub> streak {c.get('stale_streak', 0)}</span></td>"
                 f"<td class=n>{pos or '—'}</td>"
                 f"<td class=n>{fmt(pv.get('net_base'), 4)}</td>"
                 f"<td class=n>{fmt(pv.get('session_mtm_usd'), 4)}</td></tr>")
@@ -198,6 +208,7 @@ def render(pairs: list, hours: float) -> str:
     <th class=n>M2 成交率</th><th class=n>po 拒絕</th><th class=n>撤單未確認</th>
     <th class=n>M4 對沖 p50/p95 ms</th><th class=n>撤單 p50 ms</th>
     <th class=n>M3 60s 漂移 bps</th>
+    <th class=n>M5 過期 ep</th>
     <th class=n>部位</th><th class=n>淨</th><th class=n>session MTM $</th></tr>
 {"".join(maker_row(p) for p in mk)}
 </table>

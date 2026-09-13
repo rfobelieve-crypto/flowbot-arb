@@ -158,6 +158,15 @@ def build(eng) -> dict:
             "edges_refused": eng._absurd_skips,
             "vol_trips": eng.vol.trips,
             "shadow_decisions": eng.shadow_decisions,
+            # M5 的儀表。max_stale_episodes 會在第 N 次 HALT 整個 session，
+            # 而在此之前這個數字沒有任何地方看得到 —— 看板讀的是 `ok`，
+            # 而 `ok` 只有 RED guard 會翻。一個爬到 4/5 的計數不該是隱形的。
+            # streak 的單位是**評估次數**不是秒，所以它跟迴圈節奏綁在一起；
+            # 要換算成時間，拿它跟 uptime/決策數比。
+            "stale_episodes": eng._stale_episodes,
+            "stale_episode_limit": cfg.max_stale_episodes,
+            "stale_streak": eng._stale_streak,
+            "stale_streak_limit": cfg.max_consecutive_stale,
         },
         "fill_rate_pct": fill_rate,            # M2
         "latency_ms": eng.lat.snapshot(),      # M4 + the cancel round trip
