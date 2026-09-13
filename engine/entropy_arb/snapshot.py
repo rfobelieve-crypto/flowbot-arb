@@ -161,6 +161,7 @@ def build(eng) -> dict:
         },
         "fill_rate_pct": fill_rate,            # M2
         "latency_ms": eng.lat.snapshot(),      # M4 + the cancel round trip
+        "markout": eng.mark.summary(),         # M3
     }
     pnl = eng.session_pnl()
     private = {

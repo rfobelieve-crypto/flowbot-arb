@@ -166,6 +166,13 @@ def render(pairs: list, hours: float) -> str:
         m4_cls = ("" if not hedge else
                   "ok" if (hedge.get("p50", 0) < 2000
                            and hedge.get("p95", 0) < 10000) else "bad")
+        # M3 判準：平均漂移 > −1 bps 代表沒有被系統性挑走。
+        # usd 加權那個才是「這段時間實際被挑走多少」。0 筆已結算時不著色 ——
+        # 括號裡的 (n+pending) 就是為了分辨「還沒到期」與「真的沒有成交」。
+        mk3 = st.get("markout") or {}
+        u3 = mk3.get("usd_bps")
+        m3_cls = ("" if not mk3.get("n") else
+                  "ok" if (u3 or 0) > -1.0 else "bad")
         return (f"<tr><td><b>{p['pair']}</b></td>"
                 f"<td class=n>{rested}</td><td class=n>{fills}</td>"
                 f"<td class=n>{c.get('quotes_cancelled', 0)}</td>"
@@ -175,6 +182,9 @@ def render(pairs: list, hours: float) -> str:
                 f"<td class='n {m4_cls}'>{fmt(hedge.get('p50'), 0)}"
                 f" / {fmt(hedge.get('p95'), 0)}</td>"
                 f"<td class=n>{fmt(cancel.get('p50'), 0)}</td>"
+                f"<td class='n {m3_cls}'>{fmt(mk3.get('usd_bps'), 2)}"
+                f"<span class=sub> ({mk3.get('n', 0)}"
+                f"+{mk3.get('pending', 0)}p)</span></td>"
                 f"<td class=n>{pos or '—'}</td>"
                 f"<td class=n>{fmt(pv.get('net_base'), 4)}</td>"
                 f"<td class=n>{fmt(pv.get('session_mtm_usd'), 4)}</td></tr>")
@@ -187,6 +197,7 @@ def render(pairs: list, hours: float) -> str:
 <tr><th>pair</th><th class=n>掛出</th><th class=n>成交</th><th class=n>撤單</th>
     <th class=n>M2 成交率</th><th class=n>po 拒絕</th><th class=n>撤單未確認</th>
     <th class=n>M4 對沖 p50/p95 ms</th><th class=n>撤單 p50 ms</th>
+    <th class=n>M3 60s 漂移 bps</th>
     <th class=n>部位</th><th class=n>淨</th><th class=n>session MTM $</th></tr>
 {"".join(maker_row(p) for p in mk)}
 </table>
@@ -194,7 +205,9 @@ def render(pairs: list, hours: float) -> str:
  意思是「可能已經成交」而不是「已經沒了」，而一張卡在 unknown 的單會擋住
  下一次報價（<code>maker.py</code> 規則三）。<b>M2</b> 的判準是
  &ge;30% 可用、&lt;10% 這條路關掉 —— 0 筆報價時不著色，因為「還沒開始」
- 不是「不及格」。<b>M3 成交後漂移還沒進快照</b>，那一欄之後補。</div>
+ 不是「不及格」。<b>M3</b> 的判準是 usd 加權漂移 &gt; −1 bps（沒有被系統性
+ 挑走），括號裡是「已結算 + 還在等到期」—— 那兩個數字才分得出
+ 「還沒到 60 秒」與「真的沒有成交」。</div>
 """
 
     dead = [p for p in pairs if not p["alive"]]

@@ -29,6 +29,7 @@ from .book import (ArbPlan, MakerPlan, floor_step, maker_edge_bps, plan_arb,
                    plan_maker)
 from .config import Config
 from .maker import MakerOrder
+from .markout import MarkoutTracker
 from .metrics import LatencyBook
 from .recorder import MinuteRecorder
 from .volatility import VolatilityBreaker
@@ -42,6 +43,13 @@ CSV_HEADER = ["ts", "direction", "buy_venue", "sell_venue", "qty",
               "exp_edge_usd", "gross_edge_usd", "marginal_premium_bps",
               "midline_bps", "inv_add_bps", "ok", "buy_fill", "sell_fill",
               "buy_status", "sell_status", "fill_edge_usd"]
+# M3's window. X4 says 60 seconds, and the reason it cannot be shorter is
+# measured: the window has to exceed the book's own update interval or
+# mid(t+h) is just mid(t) and the number you get back is the half-spread,
+# not adverse selection (TODO §1.41, the AI +57 bps artefact). Lighter GMX
+# updates every ~9.5s; HL every ~0.3s.
+MARKOUT_HORIZON_SEC = 60.0
+
 # B3: resting quotes need columns an IOC pair has no use for. M2 (fill rate)
 # is outcome over rows; M4 (two-leg latency) is first_fill_ms + hedge_ms; M3
 # (adverse selection) is mid_at_fill compared against later minute bars.
@@ -109,6 +117,13 @@ class Engine:
         # IS the adverse-selection cost (M3), and an average hides the tail
         # that does the damage.
         self.lat = LatencyBook()
+        # M3 (2026-09-13): where the mid goes AFTER our quote is hit. M2 asks
+        # "can we get filled", M3 asks "by what" -- a 100% fill rate is worth
+        # nothing if every fill precedes a move against us. X4's criterion is
+        # the 60-second drift, and 60 is not arbitrary: the window has to be
+        # longer than the book's own update interval, and Lighter GMX was
+        # measured at 9.5s between updates (HL at 0.3s). See markout.py.
+        self.mark = MarkoutTracker(MARKOUT_HORIZON_SEC)
         # Volatility breaker: the only switch here that lifts itself. It
         # stops NEW exposure while a book is moving too fast and leaves
         # hedging, flattening and reconcile alone.
@@ -558,9 +573,19 @@ class Engine:
 
     async def _evaluate(self) -> None:
         cfg = self.cfg
+        now = time.time()
+        # M3 settles here rather than in the status loop because this runs on
+        # every book update: the sample lands within one book tick of t+h
+        # instead of within the 30-second status period. It is deliberately
+        # ABOVE the halt check -- a halted engine still owes us the markout of
+        # the fills it already took, and those are precisely the interesting
+        # ones. It never places an order, so running it while halted is safe.
+        if cfg.mode == "maker":
+            mv = self._maker_legs()[0]
+            self.mark.settle(now, mv.book.mid()
+                             if mv.book.is_fresh(cfg.staleness_sec) else None)
         if self.halted:
             return
-        now = time.time()
         # Only fresh books are sampled. During an outage the mid does not
         # change but time does, and measuring the jump on reconnection would
         # report how far the market moved while we were blind -- a fact
@@ -1403,6 +1428,16 @@ class Engine:
             self.trades += 1
             self.total_exp_edge += plan.exp_edge_usd * (filled / plan.qty
                                                         if plan.qty else 0.0)
+            # M3: remember the fill; settle() compares it against the MAKER
+            # venue's mid one horizon later. Anchored on first_fill_ts, not
+            # on now -- `now` is when the quote RESOLVED, which for a partial
+            # fill can be many seconds after the fill that got picked off,
+            # and that gap would be silently subtracted from the horizon.
+            st = order.stats
+            self.mark.record(
+                ts=st.get("first_fill_ts") or time.time(),
+                px=order.fill_px, usd=filled * order.fill_px,
+                maker_is_buy=plan.maker_is_buy)
         elif outcome == "cancelled":
             self.maker_cancels += 1
         log.info("[QUOTE DONE] %s — %s", outcome, order.describe())

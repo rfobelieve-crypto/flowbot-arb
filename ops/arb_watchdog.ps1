@@ -16,6 +16,9 @@
 #   * each member is launched exactly the way the Startup-folder launcher
 #     does it (its own minimized console via the same .bat), so the heal
 #     path and the boot path are the same path.
+#   * 存活比對**不綁 --record-only**（2026-09-13）：HMM 翻 live 之後指令列
+#     沒有那個旗標，綁著它就會讓看門狗判定 live 引擎已死並開第二個 —— 兩個
+#     引擎在同一個帳戶上對同一個市場報價。符號簽章帶尾空白，已足夠唯一。
 #   * every decision is one line in the log, including "all alive" — a
 #     watchdog that only writes when it acts looks dead when things are fine
 #     (the degradation-guard rule, freshness_board.py registry note).
@@ -35,6 +38,8 @@ $Members = [ordered]@{
   'HYPE'    = @('--symbol HYPE ', 'run_recorder_HYPE.bat')
   'GOLD_LL' = @('--symbol XAU ',  'run_recorder_GOLD_LL.bat')
   'NVDA_LL' = @('--symbol NVDA ', 'run_recorder_NVDA_LL.bat')
+  # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
+  'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
   'scanner' = @('tools\scanner.py', 'run_scanner.bat')
   # 2026-09-11 §1.25：宇宙級錄製器。它不是 main.py,所以比對式要另一條
   # （見下面的 -or）。少了這一條它死掉就沒人拉起來,而它錄的是
@@ -48,7 +53,7 @@ $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
 $dead = @()
 foreach ($name in $Members.Keys) {
   $sig, $bat = $Members[$name]
-  $alive = @($procs | Where-Object { $_ -like "*main.py --record-only*$sig*" -or ($name -in 'scanner','universe' -and $_ -like "*$sig*") }).Count
+  $alive = @($procs | Where-Object { $_ -like "*main.py*$sig*" -or ($name -in 'scanner','universe' -and $_ -like "*$sig*") }).Count
   if ($alive -ge 1) { continue }
   $dead += $name
   if (-not $DryRun) {

@@ -440,3 +440,68 @@ def test_public_guards_carry_no_dollar_amounts():
     eng.hedge.exposure = snap(0.0, free=9e9, aid="hl:0xabc:core")
     blob = " ".join(g["why"] for g in _snap(eng)["public"]["guards"])
     assert not re.search(r"\$[\d,]+\.?\d*", blob), blob
+
+
+# ------------------------------------------------------- M3: markout tracker
+
+def test_markout_sign_is_from_the_makers_side():
+    """正數永遠代表「這筆對我們有利」。符號寫反會讓整個 M3 判準變號，
+    而輸出看起來完全正常（§1.29 的 D1 就是為了擋這個）。"""
+    from entropy_arb.markout import MarkoutTracker
+    # 我們「賣」在 100，之後 mid 跌到 99 -> 我們賺 -> 正
+    t = MarkoutTracker(horizon_sec=60.0)
+    t.record(ts=0.0, px=100.0, usd=50.0, maker_is_buy=False)
+    assert t.settle(now=60.0, mid=99.0) == 1
+    assert t.summary()["mean_bps"] == pytest.approx(100.0)
+
+    # 我們「賣」在 100，之後 mid 漲到 101 -> 被挑走 -> 負
+    t = MarkoutTracker(horizon_sec=60.0)
+    t.record(ts=0.0, px=100.0, usd=50.0, maker_is_buy=False)
+    t.settle(now=60.0, mid=101.0)
+    assert t.summary()["mean_bps"] == pytest.approx(-100.0)
+
+    # 我們「買」在 100，之後 mid 漲 -> 我們賺 -> 正（另一半，方向相反）
+    t = MarkoutTracker(horizon_sec=60.0)
+    t.record(ts=0.0, px=100.0, usd=50.0, maker_is_buy=True)
+    t.settle(now=60.0, mid=101.0)
+    assert t.summary()["mean_bps"] == pytest.approx(100.0)
+
+
+def test_markout_waits_for_the_horizon_and_for_a_usable_mid():
+    from entropy_arb.markout import MarkoutTracker
+    t = MarkoutTracker(horizon_sec=60.0)
+    t.record(ts=0.0, px=100.0, usd=50.0, maker_is_buy=False)
+    assert t.settle(now=59.0, mid=99.0) == 0        # 還沒到期
+    assert t.summary()["n"] == 0 and t.summary()["pending"] == 1
+    # mid 拿不到（簿口空／過期）時**不結算**，留著等下一次 ——
+    # 用壞掉的 mid 結算會產生一個看起來完全正常的數字。
+    assert t.settle(now=61.0, mid=None) == 0
+    assert t.summary()["pending"] == 1
+    assert t.settle(now=61.0, mid=99.0) == 1
+    assert t.summary()["n"] == 1 and t.summary()["pending"] == 0
+
+
+def test_markout_usd_weight_differs_from_equal_weight():
+    """兩個都報是因為它們不一致本身就是資訊：少數大單被挑走 vs 全體均勻。"""
+    from entropy_arb.markout import MarkoutTracker
+    t = MarkoutTracker(horizon_sec=1.0)
+    t.record(ts=0.0, px=100.0, usd=10.0, maker_is_buy=True)    # 小單，+100
+    t.record(ts=0.0, px=100.0, usd=990.0, maker_is_buy=False)  # 大單，−100
+    t.settle(now=2.0, mid=101.0)
+    s = t.summary()
+    assert s["mean_bps"] == pytest.approx(0.0)          # 等權：抵銷
+    assert s["usd_bps"] == pytest.approx(-98.0, abs=0.5)   # usd 加權：大單說了算
+    assert s["worst_bps"] == pytest.approx(-100.0)
+
+
+def test_markout_reaches_the_snapshot():
+    """M3 是 override 的四個判準之一。不在快照裡 = 面板上沒有 = 沒有人看。"""
+    eng = make_engine()
+    eng.entropy.set_book(100.0, 100.1)
+    eng.hedge.set_book(100.0, 100.1)
+    eng.mark.record(ts=0.0, px=100.0, usd=50.0, maker_is_buy=False)
+    eng.mark.settle(now=1e9, mid=99.0)
+    m = _snap(eng)["public"]["markout"]
+    assert m["n"] == 1
+    assert m["horizon_sec"] == 60.0
+    assert m["mean_bps"] == pytest.approx(100.0)
