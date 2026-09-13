@@ -246,3 +246,81 @@ Premium 完全不相關。**升級分級解決不了。**
 搬完之後**只能有一支掃描器在跑**。兩支就是 2026-09-03 的 duplicate-scanner
 bug —— 兩個掃描器打同一個公開 API，正是我們為此花掉一天的那個限流，
 也正是這整條路的起點。
+
+### 已做（2026-09-13）：部署完成，而那個未知數的答案是「乾淨」
+
+上面那一節寫著「Railway 的出口 IP 可能已經被別的租戶打髒了 —— 這件事在
+部署之前是未知的，而它決定整個計畫成不成立」。**答案是乾淨的。**
+
+第一輪掃描（2,996 列）的逐場館報價覆蓋率：
+
+| 場館 | 腿數 | 有報價 |
+|---|---|---|
+| bitget / binance / okx | 1,493 / 1,469 / 1,239 | 100% |
+| **lighter** | **582** | **100%** |
+| HL | 579 | 100% |
+| xyz | 326 | 100% |
+| **lighter-rh** | **218** | **100%** |
+| para / IO | 63 / 23 | 100% |
+
+**包含最重的那一段**：Lighter 的公開 REST 沒有批量頂檔端點（§1.39 查過
+`orderBookDetails` 一次回 234 個市場但只有 mark/index/last），所以那 800
+條腿是逐市場序列呼叫出來的 —— 正是最可能撞 WAF 的形狀。
+
+    端點  https://scanner-production-efc9.up.railway.app
+    /health  ok=True  scanner_alive=True  restarts=0
+
+### 三個踩到的東西，留檔因為它們會再遇到
+
+**一、`railway.json` 的 `builder: DOCKERFILE` 沒有生效。** 第一次部署
+Railway 選了 railpack（自動偵測），然後 `prepare` 失敗。真正生效的開關是
+**服務變數 `RAILWAY_DOCKERFILE_PATH=Dockerfile.scanner`**。`railway.json`
+留著（`numReplicas` 與 healthcheck 有效），但不要以為它是選建置器的那個開關。
+
+**二、`.dockerignore` 的 `.env` 不匹配 `engine/.env`。** dockerignore 的
+模式是對**情境根目錄**比對的，所以第一版把帶私鑰的那一份留在排除清單外。
+Dockerfile 只 COPY 兩個檔，所以映像檔一直是乾淨的 —— 但**檔案會被上傳到
+建置器，而排除必須發生在上傳之前**。兩份 ignore 都補上了 `**/` 版本。
+實際救援的是 `railway up` 預設吃 `.gitignore`（`--no-gitignore` 才關掉），
+而 gitignore 的模式**本來就匹配任何層級** —— 兩種 ignore 的比對語意不同，
+這件事值得記住。
+
+**三、`railway add --variables` 會把值回顯在提示裡。** 第一個 SCAN_TOKEN
+因此進了對話紀錄，當場輪替。要設祕密變數用 `railway variables --set`
+並把輸出攔下來遮蔽；它只印 key 名。
+
+### 只能有一支掃描器：現在有三道在守
+
+散文擋不住這件事（2026-09-03 就是這樣來的），所以三個地方各寫一次：
+
+1. `railway.json` 的 **`numReplicas: 1`** —— 雲端這一半。
+2. `ops/arb_watchdog.ps1` 的 `$Members` **拿掉了 'scanner'**，
+   而那行註解寫明為什麼不可以加回來。
+3. Startup 的 `entropy-arb-record.bat` 那一行**註解掉**（機器層的持有者，
+   grep 這個 repo 找不到它 —— mistake.md 2026-09-04）。
+
+### 本機這一半：拉取掛在既有的心跳上，不是新開一個排程
+
+`arb_watchdog.ps1` 尾端加了 `scan_pull`，在重啟迴圈**之後**、帶鎖檔。
+
+* 為什麼不另開排程：`schtasks` 建的工作**預設會彈視窗**（mistake.md
+  2026-09-06，每 5 分鐘彈一次、修它花掉一個 session）。這台機器上
+  「每 5 分鐘、隱藏視窗」的心跳只有這一條，重用它比新增一條要再驗一次便宜。
+* 為什麼在重啟迴圈之後：拉取再慢也不可以延遲「引擎死了要拉起來」。
+* 為什麼有鎖檔：遠端每日 CSV 約 100 MB，第一次拉會久，而看門狗每 5 分鐘回來。
+
+**判準在新鮮度看板，兩列各答一個問題**：
+`arb scanner (§0.75b)` 答「本機有沒有收到新資料」（glob_newest 看 mtime），
+`arb 掃描器拉取 (Railway)` 答「拉取本身跑了沒、它說了什麼」（json_flag）。
+只有前者的話，Railway 活著而拉取斷掉會讓本機資料靜靜停在昨天。
+
+### 資料上的一個語意分界（會影響判決，不只是檔名）
+
+拉回來的檔帶 `_rw` 後綴。那不只是「避免覆蓋本機掃描器的檔」——
+**Railway 的列跟本機的列腿差不一樣**。§1.39 量到本機的腿差是 53 秒，
+而那個數字的主成分是 196 次序列呼叫 × RTT，換一台機器就變。
+所以來源寫進檔名，未來要分開算的時候分得開；
+不然它就是又一個「同一個容器裡放了兩種語意」（mistake.md 2026-09-13）。
+
+**還沒做**：量 Railway 那台自己的腿差，並更新 `scanner.py` 檔頭那個 53 秒。
+在量出來之前，**跨抓取段的配對 band 不可以拿 `_rw` 的列去算**。
