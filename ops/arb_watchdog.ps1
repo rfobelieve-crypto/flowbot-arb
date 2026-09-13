@@ -40,7 +40,11 @@ $Members = [ordered]@{
   'NVDA_LL' = @('--symbol NVDA ', 'run_recorder_NVDA_LL.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
   'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
-  'scanner' = @('tools\scanner.py', 'run_scanner.bat')
+  # 'scanner' 2026-09-13 退出這張表 —— 掃描器搬到 Railway 了（docs/DEPLOY.md §6）。
+  # 搬家的理由是 per-IP 的 WAF 預算：掃描器一支 65 次/分，是十支引擎合計的十六倍，
+  # 而它擋住的是**引擎的重連**，那時引擎手上有部位。**本機不可以再起第二支** ——
+  # 兩支就是 2026-09-03 的 duplicate-scanner bug，也正是這整條路的起點。
+  # 取代它的不是一個行程，是下面的 scan_pull（拉回產物）。
   # 2026-09-11 §1.25：宇宙級錄製器。它不是 main.py,所以比對式要另一條
   # （見下面的 -or）。少了這一條它死掉就沒人拉起來,而它錄的是
   # **不可回填**的分鐘資料。
@@ -53,7 +57,7 @@ $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
 $dead = @()
 foreach ($name in $Members.Keys) {
   $sig, $bat = $Members[$name]
-  $alive = @($procs | Where-Object { $_ -like "*main.py*$sig*" -or ($name -in 'scanner','universe' -and $_ -like "*$sig*") }).Count
+  $alive = @($procs | Where-Object { $_ -like "*main.py*$sig*" -or ($name -in 'universe' -and $_ -like "*$sig*") }).Count
   if ($alive -ge 1) { continue }
   $dead += $name
   if (-not $DryRun) {
@@ -92,3 +96,42 @@ try {
 }
 Add-Content -Path $Log -Value $budline -Encoding UTF8
 Write-Output $budline
+
+# 掃描器的產物拉回本機（2026-09-13，docs/DEPLOY.md §6）。
+#
+# 為什麼掛在這裡而不是另開一個排程：這台機器上「每 5 分鐘、隱藏視窗」的心跳
+# 只有這一個，而 schtasks 建的工作**預設會彈視窗**（mistake.md 2026-09-06，
+# 每 5 分鐘彈一次、修它花掉一個 session）。重用一條已經驗過的隱藏路徑，
+# 比新增一條要再驗一次的便宜。
+#
+# 放在重啟迴圈**之後**：拉取再慢也不可以延遲「引擎死了要拉起來」那件事。
+# 鎖檔擋重疊：遠端每日 CSV 約 100 MB，第一次拉會久，而看門狗每 5 分鐘回來。
+#
+# 判準是 results/scan_pull_last.json（本機位元組有沒有在長），不是這裡的
+# 退出碼 —— Railway 活著但拉取斷了，本機資料會靜靜地停在昨天而十個消費者
+# 一個都不會報錯（mistake.md 2026-08-29）。
+$Arb  = 'C:\Users\rfo\Desktop\flowbot\arb'
+$Lock = Join-Path $Arb 'results\.scan_pull.lock'
+try {
+  $stale = (Test-Path $Lock) -and
+           ((Get-Date) - (Get-Item $Lock).LastWriteTime).TotalMinutes -gt 30
+  if ((Test-Path $Lock) -and -not $stale) {
+    $pullline = "$stamp UTC  scan_pull SKIPPED (上一次還在跑)"
+  } else {
+    New-Item -ItemType File -Path $Lock -Force | Out-Null
+    # SCAN_URL / SCAN_TOKEN 從 arb/.env 讀（它被 gitignore，值不進 argv）。
+    Select-String -Path (Join-Path $Arb '.env') -Pattern '^SCAN_(URL|TOKEN)=' |
+      ForEach-Object {
+        $kv = $_.Line -split '=', 2
+        Set-Item -Path ("Env:" + $kv[0]) -Value $kv[1].Trim()
+      }
+    $out = & python (Join-Path $Arb 'tools\scan_pull.py') 2>&1
+    $pullline = "$stamp UTC  scan_pull: " + (($out | Select-Object -Last 1) -replace '\s+', ' ')
+    Remove-Item $Lock -Force -ErrorAction SilentlyContinue
+  }
+} catch {
+  $pullline = "$stamp UTC  scan_pull FAILED: $($_.Exception.Message)"
+  Remove-Item $Lock -Force -ErrorAction SilentlyContinue
+}
+Add-Content -Path $Log -Value $pullline -Encoding UTF8
+Write-Output $pullline

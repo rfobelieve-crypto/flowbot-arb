@@ -1,0 +1,56 @@
+# `railway up` 的上傳清單。
+#
+# **為什麼這份存在，而不是靠 .dockerignore**：`railway up` 打包的是
+# 上傳給建置器的目錄，而它讀的是 `.railwayignore`（沒有這份時才退回
+# `.gitignore`）。`.dockerignore` 只在建置情境那一層生效 —— 也就是說
+# 檔案已經上雲了才被排除。憑證的排除必須發生在**上傳之前**。
+#
+# 所以這份刻意與 `.dockerignore` 重複。兩份都在的理由是它們擋的是
+# 兩個不同的時點，不是同一件事寫兩次。
+#
+# 第二個工作是體積：engine/logs 是 1.1 GB，而掃描器服務一個位元組都不需要。
+
+# ---- 憑證：最重要的一條，排在最前面 ----
+# **每一條都要有 `**/` 的版本**：.dockerignore 的 `.env` 只匹配情境根目錄
+# 那一層，而真正危險的那份是 `engine/.env`（HL 與 Lighter 的私鑰）。
+# 2026-09-13 第一版就是這樣寫的，而 Dockerfile 只 COPY 兩個檔所以映像檔
+# 是乾淨的 —— 但**檔案已經被上傳到建置器了**。排除要發生在上傳之前。
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.key
+*.pem
+**/*.key
+**/*.pem
+
+# ---- 執行時產物 ----
+engine/logs/
+results/
+*.log
+*.csv
+
+# ---- 服務用不到的東西 ----
+# 判斷層留在本機（scanner.py 的檔頭：This file only COLLECTS）
+arblib/
+docs/
+tests/
+entropy-arb-main/
+perp-dex-tools-main/
+engine/entropy_arb/
+engine/config*.yaml
+engine/requirements*.txt
+engine/*.bat
+ops/
+*.md
+
+# ---- python / git ----
+.git/
+.github/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
