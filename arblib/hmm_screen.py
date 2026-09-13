@@ -60,6 +60,8 @@ import os
 import statistics as st
 import sys
 
+import yaml
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOGS = os.path.join(os.path.dirname(HERE), "engine", "logs")
 
@@ -83,6 +85,19 @@ def f(row, key):
         return None
 
 
+def _band(pair):
+    """該配對自己的 thresholds（引擎的閘門）。讀設定，不寫死 ——
+    寫死就是第二份實作，而它會安靜地跟真正做決定的那個不一致。"""
+    for nm in ("config_%s.yaml" % pair, "config_HMM_%s.yaml" % pair):
+        p = os.path.join(os.path.dirname(LOGS), nm)
+        if os.path.exists(p):
+            t = (yaml.safe_load(io.open(p, encoding="utf-8")) or {}
+                 ).get("thresholds") or {}
+            return (float(t.get("upper_bps", 0.0)),
+                    float(t.get("lower_bps", 0.0)))
+    return 0.0, 0.0          # SNDK 用預設設定檔，沒有自己的一份
+
+
 def load(pair):
     p = (os.path.join(LOGS, "minutes.csv") if pair == "SNDK"
          else os.path.join(LOGS, pair, "minutes.csv"))
@@ -104,11 +119,54 @@ def screen(pair):
         if b and a and a > b > 0:
             hs.append((a - b) / ((a + b) / 2.0) * 1e4 / 2.0)
 
-    # 兩側可做性：引擎自己逐分鐘算的邊際，直接用，不重算
-    # （第二份實作會安靜地不同意 —— mistake.md 2026-08-26）
-    sell_ok = sum(1 for r in rows if (f(r, "sell_edge_mean_bps") or -1) > 0)
-    buy_ok = sum(1 for r in rows if (f(r, "buy_edge_mean_bps") or -1) > 0)
-    minority = min(sell_ok, buy_ok) / n * 100.0
+    # 兩側可做性。
+    #
+    # **第一版用了 recorder 的 sell_edge_mean_bps / buy_edge_mean_bps，
+    # 而那是錯的構造**（2026-09-14 改正）。recorder.py:13 的定義是
+    #     sell_edge = (entropy_bid / hedge_ask - 1) * 1e4
+    # —— **兩條腿都穿價差**，那是 §0.75 的吃單–吃單構造。
+    # HMM 是掛單–吃單：在掛單腿的 ask 掛賣、到吃單腿的 ask 吃單對沖。
+    # 兩者在一個 91 bps 價差的市場上差了整整一個價差，而錯的那個會把
+    # 「幾乎一直可做」報成「0.4% 可做」。
+    #
+    # 用 recorder 既有欄位本來是對的直覺（第二份實作會安靜地不同意,
+    # mistake.md 2026-08-26）—— 但前提是那個欄位量的是同一件事。
+    # **「不要重算」不等於「拿現成的那個」**：先問它算的是哪個構造。
+    #
+    # 手算對過引擎的 log：(7.9012 − 7.8215)/7.8215 = 101.9 − 4.9 = 97.0
+    # ≈ 引擎印的 96.95 bps。
+    #
+    # 門檻（20%）一個字沒動 —— 這是儀器修正，不是閘門鬆綁
+    # （mistake.md 2026-09-03 Bitget 單位修正的同一種）。
+    # ---- G2：**只用引擎自己的決策，不自己算** ----
+    #
+    # 我試過兩次自己算，兩次都跟引擎對不上：
+    #   v1 用 recorder 的 sell_edge/buy_edge  -> 那是吃單–吃單的構造（錯）
+    #   v2 用掛單–吃單 ＋ 設定的 thresholds   -> GMX 報 34% 買側，
+    #                                            而引擎實跑是 4,782 賣 : 6 買
+    # v2 還差在哪不知道（報價定價、premium_persist、depth、post-only 都可能），
+    # **而繼續調到控制組變綠，就是把儀器擬合到我期待的答案**
+    # —— 那正是 C3 存在要擋的事（mistake.md 2026-08-26 / 2026-09-09）。
+    #
+    # 所以 G2 的唯一來源是 `logs/<pair>/shadow.csv`：引擎跑 --shadow 時
+    # 每一次報價決策的側別。它不可能跟引擎不一致,因為它就是引擎寫的。
+    # 代價是 G2 需要**先跑一輪 shadow**（GMX 70 分鐘給了 4,788 次決策,
+    # 一小時綽綽有餘）。沒跑過就是 None,而 None 不是 0 也不是 PASS。
+    sp = os.path.join(LOGS, pair, "shadow.csv")
+    sell_ok = buy_ok = None
+    if os.path.exists(sp):
+        sd = [x for x in csv.DictReader(io.open(sp, encoding="utf-8"))
+              if x.get("action") == "quote"]
+        if len(sd) >= 100:
+            sell_ok = sum(1 for x in sd if x.get("side") == "SELL")
+            buy_ok = sum(1 for x in sd if x.get("side") == "BUY")
+    if sell_ok is None:
+        minority = None
+    else:
+        tot = max(sell_ok + buy_ok, 1)
+        sell_ok = sell_ok / tot * 100.0
+        buy_ok = buy_ok / tot * 100.0
+        minority = min(sell_ok, buy_ok)
 
     # premium 的符號平衡與翻轉次數（獨立於上面那個，當交叉對照）
     prem = [f(r, "premium_mean_bps") for r in rows]
@@ -125,11 +183,11 @@ def screen(pair):
     flow_med = st.median([x for x in flow if x > 0]) if any(flow) else 0.0
 
     g1 = st.median(hs) >= G1_HALF_SPREAD_BPS if hs else False
-    g2 = minority >= G2_MINORITY_PCT
+    g2 = (minority is not None) and minority >= G2_MINORITY_PCT
     g3 = flow_pct >= G3_FLOW_PCT
     return dict(pair=pair, n=n,
                 half_spread=st.median(hs) if hs else float("nan"),
-                sell_pct=sell_ok / n * 100.0, buy_pct=buy_ok / n * 100.0,
+                sell_pct=sell_ok, buy_pct=buy_ok,
                 minority=minority, prem_med=st.median(prem) if prem else 0.0,
                 balance=bal, cross_per_day=cross_per_day,
                 flow_pct=flow_pct, flow_med=flow_med,
@@ -156,7 +214,9 @@ def main(argv=None) -> int:
           % ("配對", "分鐘", "半價差", "賣側%", "買側%", "少數側%",
              "prem中位", "翻轉/日", "有成交%", "成交$/分", "判定"))
     print("-" * 108)
-    for r in sorted(out, key=lambda x: (-x["passed"], -x["minority"])):
+    for r in sorted(out, key=lambda x: (-x["passed"],
+                                       -(x["minority"] if x["minority"]
+                                         is not None else -1))):
         mark = "".join(["1" if r["g1"] else "-", "2" if r["g2"] else "-",
                         "3" if r["g3"] else "-"])
         note = ""
@@ -166,9 +226,10 @@ def main(argv=None) -> int:
             note = "  <- 現行標的"
         if r["pair"] in BOTH_LIGHTER:
             note += "（兩腿都 Lighter）"
-        print("%-9s %5d  %8.2f %6.1f %6.1f %7.1f  %8.1f %7.1f  %7.1f %9.0f   %s%s"
-              % (r["pair"], r["n"], r["half_spread"], r["sell_pct"],
-                 r["buy_pct"], r["minority"], r["prem_med"],
+        fmt = lambda v: ("%6.1f" % v) if v is not None else "   未量"
+        print("%-9s %5d  %8.2f %s %s %s  %8.1f %7.1f  %7.1f %9.0f   %s%s"
+              % (r["pair"], r["n"], r["half_spread"], fmt(r["sell_pct"]),
+                 fmt(r["buy_pct"]), fmt(r["minority"]), r["prem_med"],
                  r["cross_per_day"], r["flow_pct"], r["flow_med"],
                  "PASS " + mark if r["passed"] else "過 " + mark, note))
 
