@@ -46,6 +46,12 @@ class StubVenue:
         self.orders_per_min = 30
         self.last_traded_ts = 0.0
         self.exposure = None
+        # snapshot.build() reads these off a venue. They are here rather than
+        # added one at a time as tests fail, because the whole reason
+        # test_venue_surface.py exists is that "the stub happens to have what
+        # this test needs" is how maker_fee_bps stayed missing for nine days.
+        self.equity = self.free = self.start_equity = None
+        self.volume_usd = 0.0
         self.book = OrderBook()
 
     def ready_to_trade(self):
@@ -356,3 +362,81 @@ def test_flag_is_written_and_carries_the_verdict(tmp_path):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------- S: 快照要看得見這些閘門
+
+def _snap(eng):
+    from entropy_arb import snapshot
+    return snapshot.build(eng)
+
+
+def _guard(snap, what):
+    return next((g for g in snap["public"]["guards"] if g["what"] == what),
+                None)
+
+
+def test_snapshot_ok_is_true_when_nothing_is_red():
+    eng = make_engine()
+    eng.entropy.set_book(100.0, 100.1)
+    eng.hedge.set_book(100.0, 100.1)
+    s = _snap(eng)
+    assert s["ok"] is True
+    assert "quote(s) rested" in s["reason"]
+
+
+def test_snapshot_goes_not_ok_and_names_the_red_guard():
+    """Reverse proof of the flag the freshness board will read."""
+    eng = make_engine()
+    eng.entropy.set_book(100.0, 100.1)
+    eng.hedge.set_book(100.0, 100.1)
+    eng._risk_halt("because the test said so")
+    s = _snap(eng)
+    assert s["ok"] is False
+    assert "HALTED" in s["reason"]
+
+
+def test_account_limits_are_visible_in_the_snapshot():
+    """The B6 limits fail by the engine quietly not opening. If they are not
+    on the dashboard, a blocked engine looks exactly like a quiet market."""
+    eng = make_engine("  min_account_free_usd: 50\n"
+                      "  max_account_gross_usd: 1000\n")
+    eng.entropy.set_book(100.0, 100.1)
+    eng.hedge.set_book(100.0, 100.1)
+
+    # (a) not read yet -> amber, because the limits fail closed
+    s = _snap(eng)
+    assert _guard(s, "ACCOUNT UNKNOWN") is not None
+
+    # (b) out of margin -> red
+    eng.entropy.exposure = snap(0.0, free=1.0)
+    eng.hedge.exposure = snap(0.0, free=9e9, aid="hl:0xabc:core")
+    g = _guard(_snap(eng), "ACCOUNT OUT OF MARGIN")
+    assert g is not None and g["level"] == "red"
+
+    # (c) healthy -> neither fires
+    eng.entropy.exposure = snap(0.0, free=9e9)
+    s = _snap(eng)
+    assert _guard(s, "ACCOUNT OUT OF MARGIN") is None
+    assert _guard(s, "ACCOUNT UNKNOWN") is None
+    assert _guard(s, "ACCOUNT CAP NEAR") is None
+
+    # (d) 80% of the ceiling -> amber, 100% -> red
+    eng.entropy.exposure = snap(850.0, free=9e9)
+    assert _guard(_snap(eng), "ACCOUNT CAP NEAR") is not None
+    eng.entropy.exposure = snap(1000.0, free=9e9)
+    assert _guard(_snap(eng), "ACCOUNT CAP HIT") is not None
+
+
+def test_public_guards_carry_no_dollar_amounts():
+    """`guards` is in the public half, and the public surface is percentages,
+    direction and time only (CLAUDE.md)."""
+    import re
+    eng = make_engine("  min_account_free_usd: 50\n"
+                      "  max_account_gross_usd: 1000\n")
+    eng.entropy.set_book(100.0, 100.1)
+    eng.hedge.set_book(100.0, 100.1)
+    eng.entropy.exposure = snap(1000.0, free=1.0, mine=250.0)
+    eng.hedge.exposure = snap(0.0, free=9e9, aid="hl:0xabc:core")
+    blob = " ".join(g["why"] for g in _snap(eng)["public"]["guards"])
+    assert not re.search(r"\$[\d,]+\.?\d*", blob), blob

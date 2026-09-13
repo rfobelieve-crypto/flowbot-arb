@@ -90,6 +90,41 @@ def build(eng) -> dict:
     if stale:
         guards.append({"level": "red", "what": "STALE BOOK",
                        "why": ", ".join(stale)})
+    # B6 (2026-09-13): the account-level limits must be VISIBLE, because the
+    # way they fail is that the engine quietly stops opening -- `_headroom`
+    # returns 0 and the only trace is one `account limit binds` line in a log
+    # nobody is reading. An engine that is running, connected, in-band and
+    # sending nothing looks exactly like a quiet market. First seen for real
+    # in the GMX rehearsal: HL's free collateral was $0 and nothing on any
+    # screen would have said why.
+    #
+    # These carry NO dollar amounts -- `guards` is in the public half, and
+    # CLAUDE.md's public-surface rule is percentages, direction and time only.
+    for v in eng.venues.values():
+        s = getattr(v, "exposure", None)
+        if s is None:
+            if cfg.max_account_gross_usd > 0 or cfg.min_account_free_usd > 0:
+                guards.append({"level": "amber", "what": "ACCOUNT UNKNOWN",
+                               "why": f"{v.name}: exposure not read yet — "
+                                      f"the account limits fail closed"})
+            continue
+        if (cfg.min_account_free_usd > 0
+                and s.free_usd < cfg.min_account_free_usd):
+            guards.append({"level": "red", "what": "ACCOUNT OUT OF MARGIN",
+                           "why": f"{s.account_id}: free collateral below the "
+                                  f"floor — NOT opening anything new"})
+        if cfg.max_account_gross_usd > 0:
+            used = s.gross_usd / cfg.max_account_gross_usd
+            if used >= 1.0:
+                guards.append({"level": "red", "what": "ACCOUNT CAP HIT",
+                               "why": f"{s.account_id}: at the account "
+                                      f"ceiling ({s.markets} market(s) carry "
+                                      f"a position; part of it is not this "
+                                      f"process)"})
+            elif used >= 0.8:
+                guards.append({"level": "amber", "what": "ACCOUNT CAP NEAR",
+                               "why": f"{s.account_id}: {100 * used:.0f}% of "
+                                      f"the account ceiling used"})
 
     fill_rate = (100.0 * eng.maker_fills / eng.maker_rested
                  if eng.maker_rested else None)
@@ -141,7 +176,28 @@ def build(eng) -> dict:
         "fill_edge_usd": eng.total_fill_edge,
         "recent": list(eng.recent_trades)[-20:],
     }
-    return {"public": public, "private": private}
+    # A flat {ok, reason} on top so this file IS a freshness-board json_flag
+    # (flow_system research/freshness_board.py `age_json_flag`, which reads a
+    # flat key). Without it a dead engine turns nothing red: the board tracks
+    # minutes.csv, which the RECORDER writes and which keeps updating whether
+    # or not the strategy is alive (mistake.md 2026-09-11: a recorder needs
+    # freshness + watchdog + manifest, and missing one makes it invisible in
+    # exactly one direction).
+    #
+    # `ok` means "connected and configured", NOT "has traded" -- a quiet
+    # market must not look like a fault (mistake.md 2026-09-03). So it is
+    # false only when a RED guard is up. No dollar figures in `reason`.
+    reds = [g for g in guards if g["level"] == "red"]
+    return {
+        "ok": not reds,
+        "reason": ("; ".join("%s: %s" % (g["what"], g["why"]) for g in reds)[:200]
+                   if reds
+                   else "%s %s, %s, %d quote(s) rested"
+                        % (public["pair"], public["mode"], public["running"],
+                           eng.maker_rested)),
+        "public": public,
+        "private": private,
+    }
 
 
 def write(eng, json_path: str, html_path: Optional[str] = None) -> None:
