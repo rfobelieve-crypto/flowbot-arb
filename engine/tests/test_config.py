@@ -156,9 +156,12 @@ def test_recording_family_configs_have_no_ws_ping():
     # 2026-09-14 加 MET 時這一關紅了,而那正是它存在的理由。
     # 每加一份 HMM 設定就要在這裡加一行。2026-09-14 這一關連抓我三次,
     # 而那三次我都真的在加 HMM 設定 —— 摩擦在做它該做的事。
+    # 第四次（FIL，2026-09-14 下午）：那次是我加一份**真的要送單**的設定,
+    # 摩擦讓我在上線前又看了一眼這份清單裡有誰。
     hmm = {"config_HMM_GMX.yaml", "config_MET.yaml",
            "config_OPENAI.yaml", "config_ANSEM.yaml", "config_MINIMAX.yaml",
-           "config_GRAM.yaml", "config_CHIP.yaml", "config_MNT.yaml"}
+           "config_GRAM.yaml", "config_CHIP.yaml", "config_MNT.yaml",
+           "config_FIL.yaml"}
     changed = [os.path.basename(p)
                for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
                if os.path.basename(p) not in hmm

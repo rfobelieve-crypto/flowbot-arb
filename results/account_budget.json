@@ -1,8 +1,8 @@
 {
-  "ok": true,
-  "reason": "live 0 / 9 腿,逐行程額度加總在帳戶天花板內",
-  "asof": "2026-09-13T10:42:03Z",
-  "ts": 1789296123.2211506,
-  "live": 0,
-  "legs": 9
+  "ok": false,
+  "reason": "B4 有 live 啟動器不在看門狗的 $Members 裡：run_hmm_MET.bat（看門狗不會拉它、本支也數不到它的額度） ｜ B3 hl:core：Σ 該腿 max_position_usd $300.00 超過帳戶天花板 $70.00（GRAM $60, CHIP $60, MNT $60, FIL $60, HMM_GMX $60）—— 每個行程都守得住自己的上限,帳戶層仍然會爆 ｜ B3 lighter:lighter：Σ 該腿 max_position_usd $480.00 超過帳戶天花板 $70.00（GRAM $60, CHIP $60, MNT $60, OPENAI $60, ANSEM $60, MINIMAX $60, FIL $60, HMM_GMX $60）—— 每個行程都守得住自己的上限,帳戶層仍然會爆",
+  "asof": "2026-09-14T07:24:03Z",
+  "ts": 1789370643.1209219,
+  "live": 8,
+  "legs": 17
 }

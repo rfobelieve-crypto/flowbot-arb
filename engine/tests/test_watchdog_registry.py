@@ -84,9 +84,12 @@ def test_every_hmm_launcher_is_registered():
         # 掃描器 2026-09-13 搬到 Railway，本機不可以再起第二支。
         "run_scanner.bat":
             "已搬到 Railway；本機再起一支就是 duplicate-scanner bug",
-        # （2026-09-14 12:52：MET 的臨時豁免已解除 —— WAF 恢復 200，
-        #   看門狗那一行也一起放回去了。留著這行註解是因為
-        #   「豁免解除了沒」正是這種清單最容易忘的一半。）
+        # 2026-09-14 MET **退場**（不是暫停）。它在 Lighter 的中位成交切片是
+        # $0.27，而兩腿最小單都是 $10 -> 93% 的成交對沖不掉，HL 那一腿在
+        # 20 分鐘 17 筆成交裡一次都沒被碰到。註冊它 = 讓看門狗把一個已知
+        # 跑不起來的策略拉起來送真單。啟動器留著當紀錄，取代者是 FIL。
+        "run_hmm_MET.bat":
+            "2026-09-14 退場：成交切片 $0.27 vs 對沖最小單 $10，做不了 HMM",
     }
     missing = sorted(on_disk - known - set(EXEMPT))
     assert not missing, "這些啟動器沒有登記在看門狗裡：%s" % missing
@@ -98,3 +101,33 @@ def test_every_hmm_launcher_is_registered():
     stale = sorted(n for n in EXEMPT
                    if not os.path.exists(os.path.join(ROOT, n)))
     assert not stale, "豁免清單裡有不存在的啟動器，該刪了：%s" % stale
+
+
+def test_no_two_launchers_share_a_signature():
+    """磁碟上不可以有兩支啟動器帶同一個 `--symbol X ` 簽章。
+
+    2026-09-14：`make_hmm_config.py` 產 FIL 時同時產了 `run_recorder_FIL.bat`
+    （--shadow），而我另外寫了 `run_hmm_FIL.bat`（live）。兩支的簽章都是
+    `--symbol FIL ` —— 看門狗照簽章比對，所以它會覺得「有一個活著」就不管；
+    而**任何人手動點開另一支，就會有兩個引擎在同一個帳戶的同一個市場上**
+    互相看到對方的部位（`unexplained_position_halt` 會跳，但那是事後）。
+
+    這正是本檔開頭那個 duplicate-scanner bug 的形狀，只是換成 duplicate-engine。
+    """
+    # **只掃真正的指令列，不掃 REM。** 第一版掃整個檔，於是把註解裡的散文
+    # 也當成簽章，抓到一個叫 `is` 的「符號」出現在六支 .bat 裡 ——
+    # 又一次「自己剛寫的儀器」（mistake.md 2026-07-29 同族）。
+    # 救它的是那個輸出本身不合理：`is` 顯然不是一個市場。
+    sigs = {}
+    for p in (glob.glob(os.path.join(ROOT, "run_recorder_*.bat"))
+              + glob.glob(os.path.join(ROOT, "run_hmm_*.bat"))):
+        body = io.open(p, "rb").read().decode("ascii", "replace")
+        for ln in body.splitlines():
+            s = ln.strip()
+            if s.lower().startswith("rem") or "main.py" not in s:
+                continue
+            for m in re.finditer(r"--symbol\s+([A-Za-z0-9_]+)", s):
+                sigs.setdefault(m.group(1), []).append(os.path.basename(p))
+    assert sigs, "一個簽章都沒解析到 —— 正則或 glob 壞了，這支等於不存在"
+    dup = {k: sorted(set(v)) for k, v in sigs.items() if len(set(v)) > 1}
+    assert not dup, "同一個簽章有多支啟動器（會變成兩個引擎）：%s" % dup

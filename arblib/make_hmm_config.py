@@ -51,7 +51,8 @@ import json
 import os
 import sys
 import time
-import urllib.request
+import urllib.error          # 明寫：`import urllib.request` 讓它剛好可用,
+import urllib.request        # 但那是實作細節,不是保證
 
 import requests
 
@@ -66,11 +67,32 @@ BAND_BPS = 15.0
 CAP_USD = 60.0
 
 
-def post(body):
+def post(body, tries: int = 5):
+    """HL 的 /info，帶退避重試。
+
+    2026-09-14：這支在產 FIL 設定時被 HTTP 429 打掉。**大聲失敗是對的**
+    （比安靜回一份殘缺的設定好太多），但 429 是暫時的,而這台機器上有 16 支
+    引擎在共用同一個 IP 的預算 —— 撞到它是常態不是例外。沒有退避 = 每次都
+    要人重跑一次,而人會在第三次的時候改成「先不管那個欄位」。
+    只對 429/5xx 退避；4xx 的其他錯（打錯 body）立刻拋，那種重試沒有意義。
+    """
     req = urllib.request.Request(
         HL, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=30))
+    for i in range(tries):
+        try:
+            return json.load(urllib.request.urlopen(req, timeout=30))
+        except urllib.error.HTTPError as e:
+            if e.code != 429 and e.code < 500:
+                raise
+            if i == tries - 1:
+                raise RuntimeError(
+                    "HL /info 連續 %d 次 %s —— 這台機器同時有多支引擎在打同一個"
+                    "端點,等幾分鐘再跑,不要把讀不到當成『那個欄位沒有』"
+                    % (tries, e.code)) from e
+            wait = 3.0 * (2 ** i)
+            print("  HL %s，%.0f 秒後重試（%d/%d）" % (e.code, wait, i + 1, tries))
+            time.sleep(wait)
 
 
 def lighter_get(path):
@@ -182,6 +204,21 @@ risk:
   vol_max_move_bps: 300.0
   vol_cooldown_sec: 60.0
   unexplained_position_halt: true
+
+control:
+  # B5 控制通道。**沒有 Telegram 憑證時它照樣可用**：
+  #     echo flat  > logs/{sym}/control.cmd     全平並保持暫停
+  #     echo pause > logs/{sym}/control.cmd     停開新倉,對沖照跑
+  # 每 2 秒輪詢,讀完即清空(殘留指令不會在重啟後再平一次倉)。
+  # 它**不能**解除 HALT —— 解除 HALT 只能靠重啟,那是刻意的。
+  #
+  # **為什麼一定要逐配對(2026-09-14 翻 live 前查到的)**：預設值是
+  # `control.cmd`,相對於 cwd,而這台機器上十幾個引擎的 cwd 全是 arb/engine,
+  # 讀取端又是 `r+` 之後 truncate —— `echo flat > control.cmd` 會被**先搶到
+  # 的那一個**吃掉,而真正在送單的那個拿到它的機率是 1/N。
+  # 那不是一個需要的時候用得上的開關,而「需要的時候用得上」是它唯一的意義。
+  command_file: logs/{sym}/control.cmd
+  poll_sec: 2.0
 
 logging:
   dashboard: false
