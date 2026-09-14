@@ -106,10 +106,24 @@ def analyse(pair: str) -> int:
     mk_ask = tp.is_maker_ask.values.astype(bool)
     usd = tp.usd.values
 
-    # C2：成交帶要蓋住掛單的時間範圍
-    q_lo, q_hi = q.t_beg.min(), q.t_end.max()
+    # C2：成交帶要蓋住掛單的時間範圍。
+    #
+    # **蓋不到的那幾張要丟掉,不是整批放棄。** 成交帶是每隔一段時間落盤的,
+    # 所以一支**還在跑**的引擎,最後幾分鐘的掛單必然蓋不到 —— 把它們算進去
+    # 就是拿一段沒有資料的時間算 0,也就是把「不知道」印成「沒有機會」
+    # （mistake.md 2026-09-13：未知狀態不可以長得像一個已知狀態）。
+    # 而整批放棄則是另一個極端:一支正在跑的引擎永遠分析不了。
     t_lo, t_hi = t_ms.min() / 1000.0, t_ms.max() / 1000.0
-    covered = (t_lo <= q_lo + 1) and (t_hi >= q_hi - 600)
+    n_before = len(q)
+    q = q[(q.t_beg >= t_lo) & (q.t_end <= t_hi)].copy()
+    n_dropped = n_before - len(q)
+    if q.empty:
+        raise RuntimeError(
+            "成交帶（%s ~ %s）完全蓋不到任何一張掛單 —— 不是「沒有機會」,"
+            "是沒有資料" % (_hhmm(t_lo), _hhmm(t_hi)))
+    # 蓋得到的那些一定是被蓋住的,所以 C2 之後永遠 PASS；真正的資訊是
+    # 丟掉了幾張,那個數字印出來。
+    covered = True
 
     rows = []
     for _, r in q.iterrows():
@@ -202,8 +216,10 @@ def analyse(pair: str) -> int:
     print("=== 自曝檢查 ===")
     print("  C1 我們成交過的單必須被歸成同價或穿過          %-6s %s"
           % ("n=%d" % len(filled), "PASS" if c1 else "**FAIL**"))
-    print("  C2 成交帶時間範圍蓋住掛單範圍                  %-6s %s"
-          % ("", "PASS" if covered else "**FAIL**"))
+    print("  C2 只分析成交帶蓋得到的掛單（丟掉 %d/%d 張）    %-6s %s"
+          % (n_dropped, n_before, "", "PASS" if covered else "**FAIL**"))
+    if n_dropped > n_before * 0.5:
+        print("     **丟掉超過一半 —— 成交帶落後太多,等它追上再看**")
     print("  C3 同一筆成交沒有被算進兩張掛單                %-6s %s"
           % ("%d<=%d" % (n_sum, n_union), "PASS" if c3 else "**FAIL**"))
     print("     （掛單視窗合計 %.0f 秒,聯集內 %d 筆 = %.2f 筆/分 —— "
@@ -213,6 +229,11 @@ def analyse(pair: str) -> int:
         print("  -> **先查這支,不要解讀上面的數字**")
         return 1
     return 0
+
+
+def _hhmm(epoch_s: float) -> str:
+    import datetime as dt
+    return dt.datetime.fromtimestamp(epoch_s).strftime("%H:%M:%S")
 
 
 def _tick_of(px: float) -> float:
