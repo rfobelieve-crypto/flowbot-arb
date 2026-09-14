@@ -160,6 +160,9 @@ class Engine:
         # stays in this map until the EXCHANGE resolves it, so an unconfirmed
         # cancel blocks the next quote instead of being quietly forgotten.
         self._maker_open: Dict[str, MakerOrder] = {}
+        # 每次 _scan_maker 有幾側通過全部關卡 -> {0: n, 1: n, 2: n}。
+        # 2 的比例就是「兩側同時掛」能買到多少,見 _scan_maker 結尾的說明。
+        self._side_hist: Dict[int, int] = {}
         self.maker_posts = 0        # quotes attempted
         self.maker_rested = 0       # quotes confirmed ON the book -> M2 denom
         self.maker_fills = 0        # quotes that got any fill -> M2 numerator
@@ -999,7 +1002,7 @@ class Engine:
         if (maker_v.book.last_update_ts <= maker_v.last_traded_ts
                 or taker_v.book.last_update_ts <= taker_v.last_traded_ts):
             return None
-        best = None
+        cands: list = []
         for maker_is_buy in (True, False):
             # posting a bid on venue M means we BUY on M and SELL on the
             # other; the hurdle is the same band the taker path uses.
@@ -1042,9 +1045,23 @@ class Engine:
                     self._skiplog("%s quote blocked by position caps "
                                   "(headroom $%.0f)", dkey, max(headroom, 0.0))
                     continue
-            if best is None or plan.exp_edge_usd > best[2].exp_edge_usd:
-                best = (maker_is_buy, dkey, plan)
-        return best
+            cands.append((maker_is_buy, dkey, plan))
+
+        # 儀器（2026-09-14）：**兩側同時合格的頻率。**
+        #
+        # 引擎評估兩側、只掛期望邊際較高的那一張。要不要改成兩側同時掛,
+        # 完全取決於這個數字 —— 如果通常只有一側合格,那個改動買不到東西,
+        # 而它要動 14 個 `_maker_open` 的使用點,在會送真單的路徑上。
+        #
+        # **這個數字只能由引擎自己記。** 我先用兩邊簿口離線重算過一次,
+        # 算出「掛賣 41% / 掛買 59%」,而引擎實跑是 83% / 17% —— 對不上,
+        # 因為離線那份用觸價對觸價,而 plan_maker 用的是對沖簿的逐檔深度、
+        # 門檻價、以及四捨五入後真正掛得出去的價。那是第二份實作,構造錯了
+        # 不會報錯(mistake.md 2026-09-14「同一個判準我猜了兩次」)。
+        self._side_hist[len(cands)] = self._side_hist.get(len(cands), 0) + 1
+        if not cands:
+            return None
+        return max(cands, key=lambda c: c[2].exp_edge_usd)
 
     async def _evaluate_maker(self, now: float) -> None:
         best = self._scan_maker(now)
@@ -2399,6 +2416,14 @@ class Engine:
                         f" fills {self.maker_fills}"
                         f" ({fill_rate:.0f}%) cx {self.maker_cancels}"
                         f" po-rej {self.maker_rejects}")
+                # 兩側同時合格的比例 —— 「兩側同時掛」能買到多少的唯一可信
+                # 來源（2026-09-14,理由寫在 _scan_maker 結尾）。
+                _h = self._side_hist
+                _tot = sum(_h.values())
+                if _tot:
+                    rec += (" | sides 0/1/2 %d/%d/%d (兩側 %.0f%%)"
+                            % (_h.get(0, 0), _h.get(1, 0), _h.get(2, 0),
+                               100.0 * _h.get(2, 0) / _tot))
                 for o in self._maker_open.values():
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
