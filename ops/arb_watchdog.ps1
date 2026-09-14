@@ -92,6 +92,21 @@ $Members = [ordered]@{
   # 啟動器留在磁碟上當紀錄,但**不註冊** —— 註冊等於讓看門狗把一個已知
   # 跑不起來的策略重新拉起來送真單。豁免寫在 tests/test_watchdog_registry.py。
   # 'MET'     = @('--symbol MET ',  'run_hmm_MET.bat')
+  # ***** AERO（Aerodrome）—— 現在是這一個在送真單。2026-09-14 起。*****
+  # 今天第四個標的,但**第一個用「能複現已付費答案的尺」挑出來的**。
+  # GMX/MET/FIL 都是被一把偏向放行的篩選挑出來的（G1 門檻 5.0 低於損益
+  # 平衡 7.4、G3 數的分鐘灰塵流全滿足、M3 的零點是半價差不是零）。
+  # AERO 過了 arblib/hmm_universe.py 的五關（128 個市場取 6 個）,
+  # 而那支的自曝檢查現在能複現實盤：MET 過不了 G4/G5、FIL 過不了 G1。
+  # 選它的理由是**殺死 MET 的那兩項它都最好**：
+  #   淨邊際 4.51 bps（六個裡最高）  吃單流少數側 47.4%（MET 是 6.9%）
+  #   中位切片 $39.93（對沖最小單的四倍,而我們整張單才 $15）
+  #
+  # **停它的順序**（2026-09-14 在 MET 上弄錯過一次,看門狗把一個會送真單的
+  # 引擎拉回來跑了 2 小時 21 分無人看管）：
+  #   1) echo flat > logs\AERO\control.cmd  2) 註解掉這一行
+  #   3) 才殺行程  4) **跨過一個 5 分鐘週期再確認一次** —— 當下回空不是證據
+  'AERO'    = @('--symbol AERO ', 'run_hmm_AERO.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
   'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
   # 'scanner' 2026-09-13 退出這張表 —— 掃描器搬到 Railway 了（docs/DEPLOY.md §6）。
