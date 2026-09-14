@@ -154,9 +154,11 @@ def test_recording_family_configs_have_no_ws_ping():
     # 所以每加一份 HMM 設定就要在這裡加一行 —— 那個摩擦是刻意的:
     # 它逼人回答「這份設定是 HMM 候選,還是我不小心動到了錄製家族」。
     # 2026-09-14 加 MET 時這一關紅了,而那正是它存在的理由。
+    # 每加一份 HMM 設定就要在這裡加一行。2026-09-14 這一關連抓我三次,
+    # 而那三次我都真的在加 HMM 設定 —— 摩擦在做它該做的事。
     hmm = {"config_HMM_GMX.yaml", "config_MET.yaml",
-           "config_OPENAI.yaml", "config_ANSEM.yaml",
-           "config_MINIMAX.yaml"}
+           "config_OPENAI.yaml", "config_ANSEM.yaml", "config_MINIMAX.yaml",
+           "config_GRAM.yaml", "config_CHIP.yaml", "config_MNT.yaml"}
     changed = [os.path.basename(p)
                for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
                if os.path.basename(p) not in hmm

@@ -270,6 +270,31 @@ class Engine:
             except RuntimeError as e:
                 log.warning("[SHADOW] live would REFUSE to start — %s",
                             str(e).replace(chr(10), " | "))
+            # 2026-09-14: 上面那句註解說 shadow 的用途之一是「說出 live 會在
+            # 哪裡拒絕，因為在 go-live 那天才發現正是這個模式要防的失敗」——
+            # **而它本來漏掉最會發生的那一個：簽章 SDK 沒裝。**
+            # 實測：`hyperliquid-python-sdk` 沒裝，而 shadow 跑了十小時乾淨,
+            # 因為 shadow 刻意不呼叫 init_signer()。於是「shadow 很乾淨」
+            # 對「live 啟動得了嗎」零資訊量。
+            #
+            # 這裡**只建構與驗證，不送任何東西**（init_signer 是 SignerClient(...)
+            # ＋ check_client() / HLAccount(...)，兩個都不下單）。失敗只警告 ——
+            # shadow 的不變式仍然是「一張單都不送」，而它現在也真的說得出
+            # live 會在哪裡拒絕。
+            if not cfg.creds_complete:
+                log.warning("[SHADOW] live would REFUSE to start — "
+                            "credentials incomplete in .env")
+            else:
+                for v in (self.entropy, self.hedge):
+                    try:
+                        v.init_signer()
+                    except Exception as e:                   # noqa: BLE001
+                        log.warning("[SHADOW] live would REFUSE to start — "
+                                    "[%s] signer: %s", v.name,
+                                    str(e).replace(chr(10), " | ")[:200])
+                    else:
+                        log.info("[SHADOW] [%s] signer would initialise OK",
+                                 v.name)
         elif live:
             self._require_armed_risk_block()
             if not cfg.creds_complete:

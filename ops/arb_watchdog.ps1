@@ -41,6 +41,11 @@ $Members = [ordered]@{
   # HMM 候選群（2026-09-14，TODO §1.41b）。全部 --shadow：完整策略跑、
   # 一張單都不送。G2 讀它們各自的 shadow.csv。設定由
   # arblib/make_hmm_config.py **從量測生成**，不是複製的。
+  # HL **core** 上的候選（2026-09-14）：不用動任何資金 —— HIP-3 的
+  # io/para/xyz 是獨立保證金池而且都是 $0.00，core 有 $98.30。
+  'GRAM'    = @('--symbol GRAM ',    'run_recorder_GRAM.bat')
+  'CHIP'    = @('--symbol CHIP ',    'run_recorder_CHIP.bat')
+  'MNT'     = @('--symbol MNT ',     'run_recorder_MNT.bat')
   # OPENAI 的 CLI 旗標是 **OAI**（HL 側 io:OAI）,不是 OPENAI ——
   # config.py 對 HL 腿用 CLI 的 symbol,而兩所對同一資產叫不同名字。
   'OPENAI'  = @('--symbol OAI ',     'run_recorder_OPENAI.bat')

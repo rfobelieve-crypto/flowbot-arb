@@ -3,7 +3,17 @@
 -r requirements.txt
 
 # Hyperliquid signing (Entropy leg, and the tradexyz hedge)
-hyperliquid-python-sdk>=0.9
+# 2026-09-14 釘版。原本是 `>=0.9`,而那是 mistake.md 2026-07-28 那個坑
+# （未釘版的 mcp 在上游發 2.0 當天炸掉 agent-mcp,跟那次 push 的內容無關）。
+# 0.24.0 是 2026-09-14 實測可以初始化簽章的版本：
+#   [HL] signer=0xA8fB... account=0x5777... (agent mode)
+#
+# **注意**：這個 SDK 宣告 `websocket-client>=1.5.1`,而本機是 0.58.0。
+# 用 `--no-deps` 裝的,所以那條沒被檢查。我們只用 `hyperliquid.utils.signing`
+# （簽章）,而它 import 得起來；升級 websocket-client 會動到正在跑的
+# lighter_tape（它 `import websocket`）,所以刻意不升。
+# 哪天 HL 的路徑開始用到它的 WS client,這裡會是第一個嫌疑。
+hyperliquid-python-sdk==0.24.0
 eth-account>=0.10
 
 # Lighter signing (only needed with --hedge lighter / lighter-rh).
