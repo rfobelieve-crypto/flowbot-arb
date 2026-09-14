@@ -59,6 +59,12 @@ class HLAccount:
 
 class HLVenue:
     kind = "hl"
+    # 對照 LighterVenue 那一格：**我們量過 Lighter，沒量過 HL。**
+    # HL 的 $10 最小單對 reduce_only 放不放行是未知的，所以維持 False ——
+    # 「另一個場館可以」不是證據（mistake.md 2026-09-03：跨交易所平移程式碼
+    # 時，單位與規則是最先要問的事）。要翻這一格，先照
+    # tools/flatten_residual.py 的形狀對 HL 實測一次，把數字寫在這裡。
+    reduce_only_ignores_min = False
 
     def __init__(self, conf: VenueConf, api_url: str, ws_url: str,
                  session: aiohttp.ClientSession, settle_timeout_sec: float) -> None:

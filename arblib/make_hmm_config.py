@@ -240,7 +240,25 @@ def build(sym, dex, hsym):
 
     clip_base = CLIP_USD / lpx
     quantum = max(lstep, hstep)
-    mnb = max(0.25 * clip_base, 3.0 * quantum)
+    # **第三個約束（2026-09-14 實盤打出來的，本支原本沒有）。**
+    # 上面兩條（< 1 張單、> 3x 量子）不足以讓引擎跑得動，因為它們沒問
+    # 「這個失衡**對沖得掉嗎**」。net-delta 對沖是 reduce-only，動的是扛著
+    # 失衡的那一腿（engine.py:2040），而任一腿都有自己的最小單。
+    # max_net_base 低於那個最小單 = 引擎會在一個它**結構上平不掉**的失衡上
+    # HALT，而 HALT 的 self-rescue 被同一個最小單擋住 -> 沒有出路。
+    #
+    # MET 實測（2026-09-14 12:15-12:53）：舊算式給 0.25 x 68 = 17 顆 = $3.75，
+    # 而 Lighter 的最小單是 50 顆 = $11.03 -> 部位累積到 -16.1 就會 HALT，
+    # 永遠走不到對沖。改成 58 顆之後，-50.6 時對沖在 3 秒內 50/50 成交。
+    hedge_floor = max(vmin / lpx,            # 掛單腿（Lighter）的最小單
+                      10.0 / lpx, 10.0 / (hpx or lpx))   # 兩腿的 $10 下限
+    mnb = max(0.25 * clip_base, 3.0 * quantum, hedge_floor * 1.15)
+    if hedge_floor >= clip_base:
+        raise RuntimeError(
+            "%s 在 $%.0f 的單量下做不出合法的 max_net_base：最小可對沖 %.6g 顆 "
+            "已經 >= 一張單 %.6g 顆。三條約束（>= 可對沖、< 一張單、> 3x 量子）"
+            "沒有交集 —— 單量要放大到至少 $%.0f，或換一個標的。"
+            % (sym, CLIP_USD, hedge_floor, clip_base, hedge_floor * lpx * 1.4))
     if mnb >= clip_base:
         raise RuntimeError("%s 的殘餘量子 %.6g 顆太粗：3 個量子已經 >= 一張單"
                            "（%.6g 顆）—— 這個標的在 $%.0f 的單量下"

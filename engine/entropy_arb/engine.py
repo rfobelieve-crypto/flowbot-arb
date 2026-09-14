@@ -1641,14 +1641,26 @@ class Engine:
                 continue
             is_sell = v.position > 0
             qty = floor_step(abs(v.position), self._step)
-            if qty < v.min_base:
+            # 2026-09-14：這兩道檢查以前無條件擋住**平倉**，而 min_base /
+            # min_quote 是**開新倉**的下限。後果是一個 25.9 顆的殘量
+            # （min_base 50）關不掉，而且第一道是靜默的 —— `flat` 收到了、
+            # 跑了、什麼都沒做、也沒留下一行說它沒做。
+            # Lighter 實測 reduce_only 不受 min_base 限制（見 venue_lighter
+            # 的 reduce_only_ignores_min），所以放行；HL 沒量過，維持擋住。
+            # **一個讓你關不掉部位的守衛是風險，不是保護。**
+            if qty < self._step:
+                continue                      # 小於一個量子，送出去也沒有意義
+            if qty < v.min_base and not v.reduce_only_ignores_min:
+                log.warning("[FLAT] %s 殘量 %.6g 顆 < 場館最小單 %.6g 顆，"
+                            "而這個場館的 reduce-only 也受限 — 關不掉",
+                            v.name, qty, v.min_base)
                 continue
             ref = v.book.best_bid() if is_sell else v.book.best_ask()
             if ref is None:
                 continue
             limit = (v.px_round(ref * (1 - slip), False) if is_sell
                      else v.px_round(ref * (1 + slip), True))
-            if qty * limit < v.min_quote:
+            if qty * limit < v.min_quote and not v.reduce_only_ignores_min:
                 log.warning("[FLAT] %s residual %.6g is below the venue "
                             "minimum — cannot be closed by order", v.name, qty)
                 continue
@@ -2047,14 +2059,22 @@ class Engine:
             if lk.locked():
                 continue
             qty = floor_step(min(abs(net), abs(v.position)), self._step)
-            if qty < v.min_base:
+            # 同 _flatten 的理由（2026-09-14）：這是 reduce-only 的**減倉**，
+            # 而 min_base / min_quote / min_order_notional 是**開新倉**的下限。
+            # Lighter 實測 reduce_only 不受 min_base 限制 -> 放行；
+            # HL 沒量過 -> 維持擋住。min_order_notional 是我們自己的策略下限
+            # （「值不值得開一張單」），對減倉同樣不適用。
+            if qty < self._step:
+                continue
+            if qty < v.min_base and not v.reduce_only_ignores_min:
                 continue
             ref = v.book.best_bid() if is_sell else v.book.best_ask()
             if ref is None:
                 continue
             limit = v.px_round(ref * (1 - slip), False) if is_sell \
                 else v.px_round(ref * (1 + slip), True)
-            if qty * limit < max(cfg.min_order_notional, v.min_quote):
+            if (qty * limit < max(cfg.min_order_notional, v.min_quote)
+                    and not v.reduce_only_ignores_min):
                 continue
             if self._blocked("hedge", v, side="SELL" if is_sell else "BUY",
                              qty=qty, px=limit, note=f"net {net:+.6g}"):

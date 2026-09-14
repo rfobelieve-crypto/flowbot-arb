@@ -165,6 +165,16 @@ class AccountOrdersFeed:
 
 class LighterVenue:
     kind = "lighter"
+    # **場館事實，2026-09-14 實測**：`min_base` 是**開新倉**的下限，
+    # `reduce_only` 的平倉單不受它限制。
+    # 怎麼量的：MET 卡了一個 25.9 顆的空單（min_base 50 顆），引擎的 `flat`
+    # 與 net-delta 對沖都在 `qty < v.min_base` 那一行**靜默** continue，
+    # 於是關不掉。`tools/flatten_residual.py --live` 送一張 reduce_only 的
+    # IOC BUY 25.9 -> 部位 -25.9 變成 0。
+    # 這一格讓 engine.py 的兩道守衛知道「平倉可以比開倉小」——
+    # **一個讓你關不掉部位的守衛是風險，不是保護。**
+    # HL 那一側刻意維持 False：沒量過的事不要當成一樣。
+    reduce_only_ignores_min = True
 
     def __init__(self, conf: VenueConf, session: aiohttp.ClientSession,
                  settle_timeout_sec: float) -> None:
