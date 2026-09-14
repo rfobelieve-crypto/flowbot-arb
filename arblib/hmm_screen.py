@@ -230,14 +230,19 @@ def screen(pair):
     # 順帶記一個實盤打出來的校準：MET 的 shadow 決策側別是 18.8% 少數側,
     # 而 **live 的 121 筆成交全部是 SELL**。所以連 shadow 的決策側別都比
     # 真相樂觀 —— 真正對得上的是吃單流（G5,MET 6.9%）。
-    sp = os.path.join(LOGS, pair, "maker.csv")
+    # **輪替過的世代也要一起讀**（理由在 `arblib/maker_log.py`）:引擎在表頭
+    # 變動時會把舊檔搬成 `.old` 再開新檔,而這裡的門檻是 `len(sd) >= 100` ——
+    # 只讀現行檔的話,**任何一次加欄位都會讓 G2 在那之後安靜地退回「未量」**,
+    # 而「未量」跟「這個市場還沒跑過」在版面上長得一模一樣。
+    from .maker_log import maker_log_paths
+    sd = []
+    for sp in maker_log_paths(os.path.join(LOGS, pair)):
+        sd += [x for x in csv.DictReader(io.open(sp, encoding="utf-8"))
+               if x.get("side") in ("SELL", "BUY")]
     sell_ok = buy_ok = None
-    if os.path.exists(sp):
-        sd = [x for x in csv.DictReader(io.open(sp, encoding="utf-8"))
-              if x.get("side") in ("SELL", "BUY")]
-        if len(sd) >= 100:
-            sell_ok = sum(1 for x in sd if x.get("side") == "SELL")
-            buy_ok = sum(1 for x in sd if x.get("side") == "BUY")
+    if len(sd) >= 100:
+        sell_ok = sum(1 for x in sd if x.get("side") == "SELL")
+        buy_ok = sum(1 for x in sd if x.get("side") == "BUY")
     if sell_ok is None:
         minority = None
     else:

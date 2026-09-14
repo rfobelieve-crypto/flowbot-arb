@@ -83,12 +83,19 @@ def load_tape(coin: str):
 
 def load_quotes(pair: str):
     import pandas as pd
-    p = os.path.join(ENGINE, "logs", pair, "maker.csv")
-    if not os.path.exists(p):
-        raise RuntimeError("沒有 %s —— 這個標的沒跑過掛單路徑" % p)
-    q = pd.read_csv(p)
+    sys.path.insert(0, os.path.dirname(ENGINE))
+    from arblib.maker_log import maker_log_paths
+    # **輪替過的世代也要讀**（理由在 arblib/maker_log.py）—— 引擎每次加欄位
+    # 都會把舊檔搬成 .old,只讀現行檔的話這支的樣本會**安靜地縮水**,
+    # 而樣本縮水在這支身上會直接改掉結論（它的判決是比率,而比率在小 n 下
+    # 跳得很兇）。同族:mistake.md 2026-08-29。
+    paths = maker_log_paths(os.path.join(ENGINE, "logs", pair))
+    if not paths:
+        raise RuntimeError("沒有 logs/%s/maker.csv —— 這個標的沒跑過掛單路徑"
+                           % pair)
+    q = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
     if q.empty:
-        raise RuntimeError("%s 是空的" % p)
+        raise RuntimeError("logs/%s/maker.csv 是空的" % pair)
     q = q[q.rest_ms.notna() & (q.rest_ms > 0)].copy()
     q["t_end"] = q.ts
     q["t_beg"] = q.ts - q.rest_ms / 1000.0

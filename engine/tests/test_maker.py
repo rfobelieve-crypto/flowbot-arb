@@ -570,6 +570,49 @@ def test_reprice_defaults_off():
         "預設關閉時不該出現這個撤單理由"
 
 
+def test_timeout_cancel_still_records_where_the_quote_was():
+    """**逾時撤單也要記下位置與邊際,而這條路徑結構上不會算它們。**
+
+    `_maker_cancel_reason` 的檢查順序是:
+
+        if now >= deadline:  return "unfilled after ..."     <- 第一個
+        ...
+        edge = maker_edge_bps(...)                           <- 後面
+        if behind > cfg.maker_reprice_bps: ...               <- 更後面
+
+    所以逾時那條 return 之後,**邊際與 behind 在那一刻都沒有被計算過**。
+    於是「理由是逾時」對「它撤的時候還好不好」零資訊量 —— 而那正是
+    「20 秒逾時該不該放寬」唯一需要的讀數（2026-09-14）。
+
+    這一關釘的就是這件事:`behind_at_cancel` / `edge_at_cancel` 在**逾時**
+    這條路徑上也必須有值。它同時是那個病自己的反向證明 —— 把記錄那兩行
+    拿掉,只有這一關會紅,上面兩關（reprice）照樣綠,因為它們走的是另一條。
+
+    **reprice 是關著的**（預設 0.0）,所以這裡量到的 behind 完全不參與撤單
+    決定 —— 記錄與決策分開,而它必須在決策沒用到它的時候也記下來。
+    """
+    eng = make_engine(maker_timeout_sec=0.05, staleness_sec=600.0)
+
+    def hook(eng, m, t, p, o):
+        def on_poll(v, n):
+            t.set_book(99.90, 100.00)
+            if n == 1:
+                m.set_book(99.00, 99.02)     # 我們那張賣單被留在很上面
+        m.on_poll = on_poll
+        m.on_cancel = lambda v: setattr(v, "ex_status", "canceled")
+    p, order = _drive(eng, hook)
+
+    assert "unfilled after" in order.stats.get("cancel_reason", ""), \
+        "情境沒走到逾時那條:%s" % order.stats.get("cancel_reason")
+    b = order.stats.get("behind_at_cancel")
+    assert b is not None, "逾時撤單沒有記下離觸價多遠 —— 那正是要量的東西"
+    # 賣單留在 99.02 之上,所以 behind 必須是正的（落在觸價後面）。
+    # 只斷言符號,不釘死小數 —— 釘死等於釘住 make_engine 的簿口。
+    assert b > 0, "簿口跑掉了而 behind 不是正的:%.4f" % b
+    assert order.stats.get("edge_at_cancel") is not None, \
+        "逾時撤單沒有記下當下的邊際"
+
+
 def test_partial_below_hedge_minimum_accumulates():
     """A fill too small for the other venue's minimum is carried, not sent
     as an order that would be rejected -- and it is NOT marked hedged."""

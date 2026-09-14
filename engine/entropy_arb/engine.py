@@ -57,7 +57,21 @@ MAKER_CSV_HEADER = ["ts", "direction", "maker_venue", "hedge_venue", "side",
                     "px", "qty", "filled", "hedged", "status", "outcome",
                     "edge_bps", "exp_edge_usd", "fill_edge_usd", "rest_ms",
                     "first_fill_ms", "hedge_ms", "cancel_ms",
-                    "cancel_attempts", "cancel_reason", "mid_at_fill"]
+                    "cancel_attempts", "cancel_reason", "mid_at_fill",
+                    # 撤單**那一刻**的兩個量,由做決定的同一段程式碼、同一本
+                    # 簿口算出來（2026-09-14）。`edge_bps` 是**掛出去時**的,
+                    # 拿它回答「撤掉的時候還好嗎」會答錯一整個 maker_timeout。
+                    #
+                    # 為什麼一定要引擎自己記,而不是事後從錄製器重建:
+                    # (a) `_maker_cancel_reason` 把逾時檢查排在**最前面**,所以
+                    #     理由是「逾時」**不蘊含**「邊際還好、位置還好」——
+                    #     那兩個檢查在那一刻根本沒跑到;
+                    # (b) 重建會撞上取樣偏誤:MON 的公開頂檔只在簿口變動時更新,
+                    #     而**逾時撤單正好發生在簿口不動的時候**（實測撤單當下
+                    #     的頂檔年齡中位 2.64 秒,而 edge decayed / behind the
+                    #     touch 只有 0.21 / 0.13）—— 於是「只取新鮮的那些重建」
+                    #     會系統性地篩掉要量的那一群,而且是往「有在動」偏。
+                    "behind_at_cancel_bps", "edge_at_cancel_bps"]
 # Shadow mode (2026-09-04). NOT a paper mode: the README's "there is no paper
 # mode -- validate with recorded data and tiny position caps, not with
 # simulated fills" still stands, and nothing here simulates a fill, a position
@@ -1244,6 +1258,18 @@ class Engine:
                 first = order.cancel_ts is None
                 if first:
                     order.stats["cancel_reason"] = reason
+                    # 撤單那一刻的位置與邊際,**在這裡記而不是事後重建**。
+                    # 理由寫在 MAKER_CSV_HEADER 旁邊,一句話版:逾時檢查排最前
+                    # 面,所以「理由是逾時」對「那時候還好不好」零資訊量,而
+                    # 那正是「20 秒逾時該不該放寬」唯一需要的那個讀數。
+                    order.stats["behind_at_cancel"] = \
+                        self._maker_behind_bps(maker_v, order)
+                    resid = order.residual
+                    order.stats["edge_at_cancel"] = maker_edge_bps(
+                        order.px, order.is_buy, taker_v.book,
+                        maker_fee_bps=maker_v.maker_fee_bps,
+                        hedge_fee_bps=taker_v.fee_bps,
+                        qty=resid) if resid > 0 else None
                     log.info("[QUOTE] cancelling — %s | %s", reason,
                              order.describe())
                 if first or now - last_cancel_send >= cancel_backoff:
@@ -1335,6 +1361,23 @@ class Engine:
         if str(res.get("err") or "").startswith("RATE_LIMITED"):
             self._mark_limited(maker_v)
 
+    def _maker_behind_bps(self, maker_v, order: MakerOrder):
+        """我們這張單落在觸價後面幾 bps（負 = 在觸價之內）。
+
+        **只有一份實作**,`_maker_cancel_reason` 的 reprice 規則與 maker.csv
+        的 `behind_at_cancel_bps` 共用它 —— 一個「引擎會不會撤這張單」的判準,
+        跟事後回答「它撤的時候在哪」的那個數,不可以是兩段算式
+        （mistake.md 2026-09-14:第二份實作在構造這一層出錯時不會報錯）。
+
+        簿口裡**包含我們自己這張單**,所以我們是最佳報價時這個值是 0。
+        """
+        mb, ma = maker_v.book.best_bid(), maker_v.book.best_ask()
+        if not (mb and ma) or ma <= mb:
+            return None
+        mid = (mb + ma) / 2.0
+        raw = (mb - order.px) if order.is_buy else (order.px - ma)
+        return raw / mid * 1e4
+
     def _maker_cancel_reason(self, maker_v, taker_v, order: MakerOrder,
                              now: float, deadline: float):
         """Why this quote should come off the book, or None to leave it."""
@@ -1398,15 +1441,11 @@ class Engine:
         # **預設 0.0 = 關閉,行為與加這段之前逐位元組相同。**
         away = cfg.maker_reprice_bps
         if away > 0:
-            mb, ma = maker_v.book.best_bid(), maker_v.book.best_ask()
-            if mb and ma and ma > mb:
-                mid = (mb + ma) / 2.0
-                behind = ((order.px - ma) if not order.is_buy
-                          else (mb - order.px)) / mid * 1e4
-                if behind > away:
-                    return (f"{behind:.1f} bps behind the touch "
-                            f"(reprice at {away:.1f}) — a quote this far back "
-                            f"does not fill, and the edge rule cannot see it")
+            behind = self._maker_behind_bps(maker_v, order)
+            if behind is not None and behind > away:
+                return (f"{behind:.1f} bps behind the touch "
+                        f"(reprice at {away:.1f}) — a quote this far back "
+                        f"does not fill, and the edge rule cannot see it")
         # Stolen from XEMM and pointed at a RESTING order, where it belongs:
         # an edge that suddenly looks wonderful usually means our own quote
         # is the stale one and somebody is about to take it.
@@ -1631,6 +1670,12 @@ class Engine:
             f"{(now - order.cancel_ts) * 1e3:.0f}" if order.cancel_ts else "",
             order.cancel_attempts, st.get("cancel_reason", ""),
             f"{st['mid_at_fill']:.8g}" if st.get("mid_at_fill") else "",
+            # 空字串 = **未量**,不是 0（mistake.md 2026-09-14:未知狀態不可以
+            # 長得像一個已知狀態）。成交掉的單沒有撤單時刻,所以它們本來就空。
+            f"{st['behind_at_cancel']:.2f}"
+            if st.get("behind_at_cancel") is not None else "",
+            f"{st['edge_at_cancel']:.2f}"
+            if st.get("edge_at_cancel") is not None else "",
         ])
 
     async def _cancel_stale_orders(self) -> None:
