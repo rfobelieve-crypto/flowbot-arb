@@ -161,6 +161,23 @@ risk:
   unexplained_position_halt: true   # 部位在我們沒送單時動了 = 清算／ADL／
                                     # 別人在同一個帳戶上 —— 三者都要停
 
+control:
+  # B5 控制通道。**沒有 Telegram 憑證時它照樣可用** —— control.py 的
+  # `_drain_command_file` 就是為此寫的：`echo flat > <這個檔>`，每 2 秒輪詢，
+  # 讀完即清空（所以殘留指令不會在重啟後再平一次倉）。
+  # 四個動詞：pause（停開新倉，對沖照跑）／resume／flat（全平並保持暫停）／
+  # status。它**不能**解除 HALT —— 那是刻意的，解除 HALT 只能靠重啟。
+  #
+  # **為什麼要寫這一行（2026-09-14，翻 live 前查到的）**：預設值是
+  # `control.cmd`，相對於 cwd，而十八個引擎的 cwd 全都是 arb\engine ——
+  # 十八個行程輪詢同一個檔，而讀取端是 `r+` 之後 truncate。
+  # 所以 `echo flat > control.cmd` 會被**先搶到的那一個**吃掉，而唯一在送
+  # 真單的那個（本引擎）拿到它的機率是 1/18。那不是一個需要的時候用得上的
+  # 開關 —— 而「需要的時候用得上」正是控制通道唯一的存在理由。
+  # 改成逐配對的路徑之後，`echo flat > logs\MET\control.cmd` 只有本引擎讀。
+  command_file: logs/MET/control.cmd
+  poll_sec: 2.0
+
 logging:
   dashboard: false
   level: INFO

@@ -51,10 +51,19 @@ $Members = [ordered]@{
   'OPENAI'  = @('--symbol OAI ',     'run_recorder_OPENAI.bat')
   'ANSEM'   = @('--symbol ANSEM ',   'run_recorder_ANSEM.bat')
   'MINIMAX' = @('--symbol MINIMAX ', 'run_recorder_MINIMAX.bat')
-  # MET —— HMM 候選的 record-only 錄製器（2026-09-14，TODO §1.41b）。
-  # 它要回答 GMX 死掉的那一關：premium 會不會震盪（判準在
-  # arblib/hmm_screen.py，跑之前凍結）。**record-only，不送單。**
-  'MET'     = @('--symbol MET ',  'run_recorder_MET.bat')
+  # ***** MET（Meteora）—— 這一個在送真單。2026-09-14 起。*****
+  # 使用者當天第二次明確授權（第 9 次 override 寫著「翻成 live 要使用者再
+  # 說一次」）。從 record-only 換成 live 的理由不是它過了 G2（少數側 18.8%
+  # < 20%），是 **G2 以外的三個判準在 shadow 下量不到**：
+  # shadow_decisions 與 quotes_cancelled 逐筆相等而 quotes_rested 恆為 0，
+  # 所以 M2／M3／M4 的分母永遠是零，再跑幾天也不會出現。
+  #
+  # **看門狗對這一列的責任因此不一樣**：它重啟的是一個會下單的行程。
+  # 重啟本身是安全的（HALT 是單向的，而重啟會用 strict=True 重讀真實部位），
+  # 但要停掉它**不可以只靠殺行程** —— 這張表會把它拉回來。
+  # 停止的順序寫在 run_hmm_MET.bat 的檔頭：先 `echo flat > logs\MET\control.cmd`
+  # 等它平完，再把這一列註解掉，最後才殺行程。
+  'MET'     = @('--symbol MET ',  'run_hmm_MET.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
   'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
   # 'scanner' 2026-09-13 退出這張表 —— 掃描器搬到 Railway 了（docs/DEPLOY.md §6）。
