@@ -74,8 +74,32 @@ _MEMBER = re.compile(r"^\s*'([^']+)'\s*=\s*@\(\s*'[^']*'\s*,\s*'([^']+)'\s*\)",
                      re.M)
 
 
+def stopped_launchers() -> set:
+    """被 STOP 檔停掉的啟動器（2026-09-14）。
+
+    `logs/stop/<啟動器檔名>.stop` 是「這支現在刻意不要跑」的**單一真相源**,
+    `.bat` 的迴圈與 `arb_watchdog.ps1` 都讀它。**本支是第三個讀者。**
+
+    少了這一段,一個已經停掉的成員仍然會被算進帳戶額度 —— 2026-09-14 XPL
+    停掉之後就是這樣:B3 報 $120 超過上限 $70,而實際在跑的只有 MON 的 $60。
+    一個對不存在的曝險報紅的風控檢查,會訓練人忽略它。
+
+    這是「一份資料有幾個讀者就要驗幾個」那一條（mistake.md 2026-09-11：
+    freshness 是綠的而 watchdog 正在殺它,因為兩個讀者只驗了一個）。
+    """
+    d = os.path.join(ENGINE, "logs", "stop")
+    if not os.path.isdir(d):
+        return set()
+    return {os.path.basename(f)[:-len(".stop")] + ".bat"
+            for f in glob.glob(os.path.join(d, "*.stop"))}
+
+
 def registered_launchers() -> dict:
-    """name -> launcher .bat, straight out of the watchdog's own table."""
+    """name -> launcher .bat, straight out of the watchdog's own table.
+
+    **被 STOP 檔停掉的成員不算在內** —— 它們註冊著、但不會被拉起來,
+    所以不佔帳戶額度。理由見 stopped_launchers()。
+    """
     with open(WATCHDOG, encoding="utf-8") as fh:
         src = fh.read()
     out = dict(_MEMBER.findall(src))
@@ -86,7 +110,8 @@ def registered_launchers() -> dict:
             "parsed 0 members out of %s — the $Members table's shape changed; "
             "fix the regex rather than letting this return an empty set"
             % WATCHDOG)
-    return out
+    stopped = stopped_launchers()
+    return {k: v for k, v in out.items() if v not in stopped}
 
 
 def parse_bat(path: str) -> dict | None:
@@ -176,7 +201,14 @@ def main(argv=None) -> int:
     reds: list = []
 
     # ---- B4 先做：不在註冊表裡的 live 啟動器 ----------------------------
+    # **帶 STOP 檔的不算**（2026-09-14）。一支已退場的啟動器留在磁碟上是
+    # 刻意的（它是紀錄）,而「它現在不該跑」這件事應該由 STOP 檔說,不是由
+    # 「它不在註冊表裡」這個**缺席**來說。缺席與退場在這裡長得一模一樣,
+    # 而它們要求的下一個動作相反（缺席 -> 去補註冊;退場 -> 什麼都不用做）。
+    # 未知狀態不可以長得像一個已知狀態（mistake.md 2026-09-13 / 09-14）。
+    stopped_all = stopped_launchers()
     known = {os.path.basename(b).lower() for b in reg.values()}
+    known |= {b.lower() for b in stopped_all}
     stray = []
     for p in sorted(glob.glob(os.path.join(ENGINE, "*.bat"))):
         if os.path.basename(p).lower() in known:
@@ -185,8 +217,9 @@ def main(argv=None) -> int:
         if j and j["live"]:
             stray.append(j["bat"])
     if stray:
-        reds.append("B4 有 live 啟動器不在看門狗的 $Members 裡：%s"
-                    "（看門狗不會拉它、本支也數不到它的額度）"
+        reds.append("B4 有 live 啟動器不在看門狗的 $Members 裡、也沒有 STOP 檔："
+                    "%s（看門狗不會拉它、本支也數不到它的額度；"
+                    "要嘛註冊它,要嘛給它一個 logs/stop/<名字>.stop）"
                     % ", ".join(stray))
     else:
         print("B4 沒有遊蕩的 live 啟動器 ✓")
