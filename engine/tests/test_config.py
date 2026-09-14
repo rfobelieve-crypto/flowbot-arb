@@ -161,7 +161,7 @@ def test_recording_family_configs_have_no_ws_ping():
     hmm = {"config_HMM_GMX.yaml", "config_MET.yaml",
            "config_OPENAI.yaml", "config_ANSEM.yaml", "config_MINIMAX.yaml",
            "config_GRAM.yaml", "config_CHIP.yaml", "config_MNT.yaml",
-           "config_FIL.yaml", "config_AERO.yaml"}
+           "config_FIL.yaml", "config_AERO.yaml", "config_XPL.yaml"}
     changed = [os.path.basename(p)
                for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
                if os.path.basename(p) not in hmm

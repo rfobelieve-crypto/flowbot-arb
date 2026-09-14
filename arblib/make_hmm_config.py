@@ -374,7 +374,11 @@ def main(argv=None) -> int:
     import yaml
     yaml.safe_load(io.open(cfg, encoding="utf-8"))   # 語法自曝
 
-    bp = os.path.join(ENG, "run_recorder_%s.bat" % d["sym"])
+    # **名字要跟模式一致。** 2026-09-14 shadow 退場之後這支產的是會下單的
+    # 啟動器,而它原本還叫 `run_recorder_*` —— 一個叫「recorder」的檔案會
+    # 送真單,是下一個人最容易誤會的東西。改成 run_hmm_*,跟既有的
+    # live 啟動器同一個命名,看門狗的註冊表也只認這個前綴。
+    bp = os.path.join(ENG, "run_hmm_%s.bat" % d["sym"])
     b = BAT.format(eng=ENG, sym=d["sym"], hsym=d["hsym"],
                    date=d["date"],
                    bs=chr(92)).replace("\n", "\r\n").encode("ascii")

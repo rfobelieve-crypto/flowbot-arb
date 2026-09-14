@@ -97,6 +97,25 @@ def test_every_hmm_launcher_is_registered():
         # 重篩，若 FIL 仍在名單上就把看門狗那行放回去、這裡刪掉。
         "run_hmm_FIL.bat":
             "2026-09-14 停用：淨 +0.46 bps 貼損益平衡線，一小時 0 成交",
+        # ---- 2026-09-14 一次退場的八支。啟動器留在磁碟上當紀錄,但不註冊
+        #      —— 註冊等於讓看門狗把已知跑不起來的東西拉起來送真單。
+        #      要重開任何一支,先讓它過 arblib/hmm_universe.py 的關。
+        "run_hmm_AERO.bat":
+            "2026-09-14 停用：上線後 Lighter 半價差從 10.57 塌到 5.31 -> 淨 -0.90",
+        "run_hmm_GMX.bat":
+            "2026-09-14 退場：市場一天只成交 45 筆（條件 4）",
+        "run_recorder_CHIP.bat":
+            "2026-09-14 退場：切片 $0.03、吃單流 97.4% 單向（G4/G5）",
+        "run_recorder_GRAM.bat":
+            "2026-09-14 退場：價差太窄,shadow 決策 0 次",
+        "run_recorder_MNT.bat":
+            "2026-09-14 退場：新的五關判掉",
+        "run_recorder_OPENAI.bat":
+            "2026-09-14 退場：HIP-3 的 io 池是 $0.00,永遠不可能成交",
+        "run_recorder_ANSEM.bat":
+            "2026-09-14 退場：HIP-3 的 para 池是 $0.00",
+        "run_recorder_MINIMAX.bat":
+            "2026-09-14 退場：HIP-3 的 xyz 池是 $0.00",
     }
     missing = sorted(on_disk - known - set(EXEMPT))
     assert not missing, "這些啟動器沒有登記在看門狗裡：%s" % missing

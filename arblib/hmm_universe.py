@@ -61,6 +61,12 @@ FEES_BPS = 0.40 + 4.50          # Lighter maker + HL taker
 G1_NET_BPS = 3.0
 G4_MIN_SLICE_USD = 10.0
 G5_TAKER_MINORITY_PCT = 35.0
+# G7（2026-09-14,AERO 教的）：**中位數會騙人。**
+# AERO 的 24 小時中位半價差是 10.57 bps -> 過 G1,於是上線。
+# 一小時後它塌到 5.31 -> 淨 -0.90,引擎正確地停止報價,一小時 0 成交。
+# 中位數只說「一半的時間在線上」,而做市是**持續**的生意 —— 我們要的是
+# 「這個市場有多少時間是可做的」,那才決定樣本累積得多快。
+G7_UPTIME_PCT = 50.0
 MIN_TRADES = 100                # 樣本下限；低於這個一律「未量」
 MIN_HL_VOL_USD = 50_000.0       # 對沖腿要有量，否則它是死的（AI 的教訓）
 
@@ -122,6 +128,18 @@ def build(hours: int):
         "trades": g.size(),
         "vol": g["usd"].sum(),
     })
+    # G7：**逐筆**算淨邊際,再看有多少比例在門檻之上。
+    # 對沖腿的半價差用該幣的中位（HL 的簿口穩定得多,而且我們沒有逐筆對齊
+    # 的資料 —— 用中位是保守方向：HL 價差被低估會讓我們的淨值被高估）。
+    hlmed = df["hl_hs"].to_dict()
+    up = {}
+    for c, x in lt.groupby("coin"):
+        h = hlmed.get(c)
+        if h is None or len(x) < 200:
+            continue
+        net_series = x["hs"].values - h - FEES_BPS
+        up[c] = float((net_series > G1_NET_BPS).mean() * 100.0)
+    df["uptime"] = [up.get(c, float("nan")) for c in df.index]
     df = df[df.trades >= MIN_TRADES].dropna(subset=["lt_hs", "slice"])
     df["taker_min"] = np.minimum(df.taker_buy, 100.0 - df.taker_buy)
     # 對沖腿讀不到半價差時**不要猜** —— 那一列標成未量，不進判定。
@@ -140,13 +158,14 @@ def build(hours: int):
 
 
 def verdict(r):
-    """五關裡這支管得到的三關 ＋ 對沖腿存在性。未量一律不算過。"""
+    """這支管得到的四關 ＋ 對沖腿存在性。未量一律不算過。"""
     import math
     g1 = (not math.isnan(r.net)) and r.net > G1_NET_BPS
     g4 = r["slice"] >= G4_MIN_SLICE_USD
     g5 = r.taker_min >= G5_TAKER_MINORITY_PCT
+    g7 = (not math.isnan(r.uptime)) and r.uptime >= G7_UPTIME_PCT
     hedge = (not math.isnan(r.hl_vol)) and r.hl_vol >= MIN_HL_VOL_USD
-    return g1, g4, g5, hedge
+    return g1, g4, g5, g7, hedge
 
 
 def main(argv=None) -> int:
@@ -159,32 +178,33 @@ def main(argv=None) -> int:
     print("Lighter tob %d 檔 / HL mid %d 檔 / 成交帶 %d 檔"
           " -> %d 個市場（成交 >= %d 筆）\n"
           % (files[0], files[1], files[2], len(df), MIN_TRADES))
-    print("判準：G1 淨 > %.1f bps（Lighter 半價差 − HL 半價差 − 費用 %.2f）"
-          "  G4 切片 >= $%.0f  G5 吃單流少數側 >= %.0f%%  ＋ 對沖腿 HL 量 >= $%.0fk"
-          % (G1_NET_BPS, FEES_BPS, G4_MIN_SLICE_USD,
-             G5_TAKER_MINORITY_PCT, MIN_HL_VOL_USD / 1000))
+    print("判準：G1 淨 > %.1f bps  G4 切片 >= $%.0f  G5 吃單流少數側 >= %.0f%%"
+          "  **G7 在線時間 >= %.0f%%**  ＋ 對沖腿 HL 量 >= $%.0fk"
+          % (G1_NET_BPS, G4_MIN_SLICE_USD, G5_TAKER_MINORITY_PCT,
+             G7_UPTIME_PCT, MIN_HL_VOL_USD / 1000))
     print()
 
     rows = []
     for c, r in df.iterrows():
-        g1, g4, g5, hedge = verdict(r)
-        rows.append((c, r, g1, g4, g5, hedge, g1 and g4 and g5 and hedge))
-    ok = [x for x in rows if x[6]]
+        g1, g4, g5, g7, hedge = verdict(r)
+        rows.append((c, r, g1, g4, g5, g7, hedge,
+                     g1 and g4 and g5 and g7 and hedge))
+    ok = [x for x in rows if x[7]]
     ok.sort(key=lambda x: -x[1].vol)
 
     print("=== 通過的市場：**%d 個**（共 %d 個）===\n" % (len(ok), len(rows)))
-    hdr = ("%-9s %8s %8s %8s %9s %9s %12s %13s"
-           % ("市場", "LT半價差", "HL半價差", "淨bps", "切片$", "吃單少數%",
+    hdr = ("%-9s %8s %8s %9s %9s %9s %12s %13s"
+           % ("市場", "LT半價差", "淨bps", "**在線%**", "切片$", "吃單少數%",
               "LT成交$", "HL日成交$"))
     print(hdr)
     print("-" * len(hdr))
     for c, r, *_ in ok[:a.top]:
-        print("%-9s %8.2f %8.2f %8.2f %9.2f %9.1f %12.0f %13.0f"
-              % (c, r.lt_hs, r.hl_hs, r.net, r["slice"], r.taker_min,
+        print("%-9s %8.2f %8.2f %9.1f %9.2f %9.1f %12.0f %13.0f"
+              % (c, r.lt_hs, r.net, r.uptime, r["slice"], r.taker_min,
                  r.vol, r.hl_vol))
 
     print("\n=== 自曝檢查（答案已知；紅了先查這支，不是查市場）===")
-    d = {c: (r, g1, g4, g5, h) for c, r, g1, g4, g5, h, _ in rows}
+    d = {c: (r,) for c, r, *_ in rows}
     checks = []
     if "BTC" in d:
         r = d["BTC"][0]
@@ -203,6 +223,15 @@ def main(argv=None) -> int:
         r = d["FIL"][0]
         checks.append(("C5 FIL 必須**過不了** G1（實盤一小時 0 成交）",
                        r.net <= G1_NET_BPS, "%.2f bps" % r.net))
+    if "AERO" in d:
+        # **C6 是這一關自己的反向證明。** AERO 的中位半價差 10.57 過了 G1,
+        # 於是我們上線 —— 然後一小時 0 成交,因為它塌到 5.31。
+        # 如果 G7 有分辨力,AERO 的在線時間必須明顯低於門檻。
+        r = d["AERO"][0]
+        checks.append(("C6 AERO 的在線時間必須 < %.0f%%（中位過關但實盤 0 成交）"
+                       % G7_UPTIME_PCT,
+                       (r.uptime == r.uptime) and r.uptime < G7_UPTIME_PCT,
+                       "%.1f%%" % r.uptime))
     allok = True
     for name, passed, val in checks:
         print("  %-52s %-10s %s" % (name, val, "PASS" if passed else "**FAIL**"))
