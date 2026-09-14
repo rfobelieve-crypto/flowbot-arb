@@ -63,6 +63,13 @@ $Members = [ordered]@{
   # 但要停掉它**不可以只靠殺行程** —— 這張表會把它拉回來。
   # 停止的順序寫在 run_hmm_MET.bat 的檔頭：先 `echo flat > logs\MET\control.cmd`
   # 等它平完，再把這一列註解掉，最後才殺行程。
+  # 2026-09-14 12:45-12:52 曾短暫停用：Lighter 的 CloudFront WAF 對我們回
+  # `x-amzn-waf-action: captcha`（HTTP 405），而引擎啟動要讀
+  # /api/v1/orderBooks 拿市場表，讀不到就 5 次重試後崩潰 -> .bat 迴圈 30 秒
+  # 再來一輪 = 一個產不出東西卻在燒**共用 IP 預算**的迴圈，而那個預算是另外
+  # 16 支錄製器在用的（下面 scanner 那段搬去 Railway 就是為了同一件事）。
+  # 12:52 連探三次都 200 -> 解除。**這段留著當下次的處置**：
+  # WAF 擋的時候不要重開，因為重連正是它最會擋的動作，而那時引擎手上有部位。
   'MET'     = @('--symbol MET ',  'run_hmm_MET.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
   'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')

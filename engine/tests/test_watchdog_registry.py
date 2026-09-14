@@ -78,6 +78,23 @@ def test_every_hmm_launcher_is_registered():
     on_disk = {os.path.basename(p) for p in
                glob.glob(os.path.join(ROOT, "run_recorder_*.bat"))
                + glob.glob(os.path.join(ROOT, "run_hmm_*.bat"))}
-    # run_scanner.bat 刻意不在表上（掃描器 2026-09-13 搬到 Railway）
-    missing = sorted(on_disk - known - {"run_scanner.bat"})
+    # 豁免必須**具名並寫理由** —— 放寬條件而不寫理由，就是讓這支測試慢慢
+    # 變成不存在（mistake.md 2026-08-26 的形狀）。
+    EXEMPT = {
+        # 掃描器 2026-09-13 搬到 Railway，本機不可以再起第二支。
+        "run_scanner.bat":
+            "已搬到 Railway；本機再起一支就是 duplicate-scanner bug",
+        # （2026-09-14 12:52：MET 的臨時豁免已解除 —— WAF 恢復 200，
+        #   看門狗那一行也一起放回去了。留著這行註解是因為
+        #   「豁免解除了沒」正是這種清單最容易忘的一半。）
+    }
+    missing = sorted(on_disk - known - set(EXEMPT))
     assert not missing, "這些啟動器沒有登記在看門狗裡：%s" % missing
+    # 反向：豁免清單不可以留著指向已經不存在的檔案 —— 那會讓下一個人以為
+    # 某個啟動器被刻意停用，而它其實只是被刪了。
+    # 注意：這裡要用 os.path.exists 而不是 `- on_disk` —— on_disk 只收
+    # run_recorder_* / run_hmm_*，而 run_scanner.bat 依定義不在裡面，
+    # 用集合差會把它誤判成「不存在」。（第一版就是這樣紅的。）
+    stale = sorted(n for n in EXEMPT
+                   if not os.path.exists(os.path.join(ROOT, n)))
+    assert not stale, "豁免清單裡有不存在的啟動器，該刪了：%s" % stale
