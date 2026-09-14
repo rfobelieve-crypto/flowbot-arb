@@ -450,18 +450,24 @@ class Engine:
     # --------------------------------------------------------------- signals
 
     def _inv_add_bps(self, buy, sell) -> float:
-        """Inventory ladder: a surcharge that grows once a venue's position
-        passes floor_frac of its cap in the direction the trade would add to
-        (buying adds when that venue is >= flat long; selling adds when the
-        venue is <= flat short). Max of the two venues' ramps."""
+        """Inventory skew, in bps on top of fees. **可正可負。**
+
+        正值 = 加倉側的罰金,一旦某條腿的部位越過 cap 的 floor_frac 就開始
+        長(買進時該腿 >= 持平做多算加倉;賣出時該腿 <= 持平做空算加倉)。
+        取兩條腿斜坡的較大值。
+
+        負值 = 減倉側的折讓(2026-09-14 新增,預設關閉)。同一條斜坡乘上
+        `inventory_relief_frac`。少了它,偏移只有「加倉變貴」沒有「減倉變
+        便宜」,而持續單向的流量會讓引擎永遠停在上限上。
+        """
         scale = self.cfg.inventory_scale_bps
         if scale <= 0:
             return 0.0
         floor = min(max(self.cfg.inventory_floor_frac, 0.0), 0.99)
 
-        def ramp(v, adding: bool) -> float:
-            if not adding:
-                return 0.0
+        def mag(v) -> float:
+            """斜坡的量值,與方向無關。原本這段寫在 ramp() 裡,抽出來是因為
+            減倉側也要用它 —— 見下面的折讓。"""
             ref = v.book.mid()
             if ref is None:
                 return 0.0
@@ -470,7 +476,30 @@ class Engine:
                 return 0.0
             return scale * (u - floor) / (1.0 - floor)
 
-        return max(ramp(buy, buy.position >= 0), ramp(sell, sell.position <= 0))
+        # 加倉側的罰金。這兩行與 2026-09-14 之前逐字等價。
+        add = max(mag(buy) if buy.position >= 0 else 0.0,
+                  mag(sell) if sell.position <= 0 else 0.0)
+        if add > 0.0:
+            return add
+
+        # ------------------------------------------------------ 減倉側的折讓
+        # 走到這裡代表這筆交易**減少**庫存(兩條腿在 HMM 裡總是同向移動:
+        # 掛單腿買進的那一側,對沖腿就賣出)。
+        #
+        # 舊版在這裡回 0.0,也就是**偏移只做了一半** —— 加倉變貴了,減倉卻
+        # 沒有變便宜。後果不是「比較慢回到零」,是**根本回不去**:
+        # 持續單向的流量會把庫存推到上限,然後加倉側被硬上限擋住、減倉側的
+        # 門檻從來沒降過,兩側都不動。2026-09-14 XPL 就停在那裡
+        # (報價側別 332:0、$58.7/$60、十分鐘 95 次 blocked)。
+        #
+        # 折讓與罰金用**同一條斜坡**,乘上 relief_frac。用同一條斜坡是刻意的:
+        # 兩個獨立的曲線會安靜地不一致,而這裡沒有任何東西會報錯。
+        #
+        # **relief_frac 預設 0.0**,所以不設定的話這裡仍然回 0.0,行為不變。
+        relief = min(max(self.cfg.inventory_relief_frac, 0.0), 1.0)
+        if relief <= 0.0:
+            return 0.0
+        return -relief * max(mag(buy), mag(sell))
 
     def _eff_threshold(self, buy, sell) -> float:
         """Net hurdle (bps, on top of fees) for the direction buy->sell.
@@ -481,7 +510,14 @@ class Engine:
             base = self.cfg.midline_bps + self.cfg.upper_bps
         else:
             base = self.cfg.lower_bps - self.cfg.midline_bps
-        return base + self._inv_add_bps(buy, sell)
+        adj = self._inv_add_bps(buy, sell)
+        if adj >= 0.0:
+            return base + adj
+        # 折讓不可以把門檻壓到地板以下。地板預設 0.0 = 「扣完費用剛好打平」,
+        # 也就是**引擎最多願意不賺錢出貨,不會付錢出貨**。要允許付錢平倉,
+        # 把 inventory.min_threshold_bps 設成負的 —— 那是人的決定,不是
+        # 一個可以由庫存壓力自動觸發的動作。
+        return max(base + adj, self.cfg.inventory_min_threshold_bps)
 
     # How stale an account snapshot may be before it counts as unknown, as a
     # multiple of reconcile_sec. The snapshot rides on fetch_position(), so a

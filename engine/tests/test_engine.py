@@ -101,6 +101,71 @@ def test_inventory_ladder():
     assert abs(v2 - v) < 0.6, (v, v2)             # max, not sum
 
 
+def _laden(relief=0.0, floor_bps=0.0):
+    """滿倉的引擎:entropy 腿做空、hedge 腿做多,兩條腿都在 cap 的 90%。
+
+    這正是 2026-09-14 XPL 的形狀(報價側別 332:0、部位 $58.7/$60、
+    十分鐘 95 次 blocked by position caps)。
+    """
+    eng = make_engine(midline=0.0, upper=3.0, lower=3.0)
+    eng.cfg.inventory_scale_bps, eng.cfg.inventory_floor_frac = 10.0, 0.0
+    eng.cfg.inventory_relief_frac = relief
+    eng.cfg.inventory_min_threshold_bps = floor_bps
+    e, h = eng.entropy, eng.hedge
+    e.set_book(99.9, 100.1)
+    h.set_book(99.9, 100.1)
+    e.position = -90.0
+    h.position = +90.0
+    return eng, e, h
+
+
+def test_relief_defaults_off_so_today_is_unchanged():
+    """預設 relief_frac=0 -> 減倉側仍然回 0.0。
+
+    這一關是「這個改動沒有偷偷改變正在跑的東西」的證據。跟上面的
+    test_inventory_ladder 是同一件事的兩種說法,兩條都留著:那條用舊的
+    夾板設定,這條用滿倉的新形狀。
+    """
+    eng, e, h = _laden(relief=0.0)
+    # 減倉方向:買回 entropy 的空單 = buy entropy
+    approx(eng._inv_add_bps(buy=e, sell=h), 0.0)
+    # 加倉方向仍然收罰金
+    assert eng._inv_add_bps(buy=h, sell=e) > 8.0
+
+
+def test_relief_makes_the_reducing_side_cheaper():
+    """開了折讓,減倉側的門檻才會降 —— 那正是舊版缺的那一半。"""
+    eng, e, h = _laden(relief=1.0, floor_bps=-99.0)
+    adj = eng._inv_add_bps(buy=e, sell=h)
+    assert adj < -8.0, adj                 # u=0.9, scale=10, floor=0 -> ~-9
+    # 加倉側**沒有**因此變便宜:偏移是一邊寬一邊緊,不是整體平移
+    assert eng._inv_add_bps(buy=h, sell=e) > 8.0
+
+
+def test_relief_cannot_push_the_hurdle_below_the_floor():
+    """地板預設 0.0 = 最多不賺錢出貨,不會付錢出貨。
+
+    這一關擋的是「庫存壓力大到讓引擎自動開始虧錢平倉」。要那樣做必須有人
+    把 min_threshold_bps 設成負的 —— 會花錢的行為不可以由一個自動的斜坡
+    觸發。
+    """
+    eng, e, h = _laden(relief=1.0, floor_bps=0.0)
+    # base = lower - midline = 3.0,折讓約 -9 -> 3-9 = -6,但地板是 0
+    approx(eng._eff_threshold(buy=e, sell=h), 0.0)
+    eng.cfg.inventory_min_threshold_bps = -2.0
+    approx(eng._eff_threshold(buy=e, sell=h), -2.0)
+
+
+def test_relief_is_the_same_ramp_as_the_surcharge():
+    """折讓與罰金共用同一條斜坡 —— 兩條獨立的曲線會安靜地不一致。"""
+    eng, e, h = _laden(relief=1.0, floor_bps=-99.0)
+    add = eng._inv_add_bps(buy=h, sell=e)
+    red = eng._inv_add_bps(buy=e, sell=h)
+    approx(add, -red, tol=1e-6)
+    eng.cfg.inventory_relief_frac = 0.5
+    approx(eng._inv_add_bps(buy=e, sell=h), -add * 0.5, tol=1e-6)
+
+
 def run_scan(eng):
     async def go():
         # first pass arms the direction, second passes the persistence gate

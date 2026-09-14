@@ -146,6 +146,26 @@ class Config:
     # inventory ladder
     inventory_scale_bps: float
     inventory_floor_frac: float
+    # 減倉側的折讓（2026-09-14）。上面那兩個只組成**罰金**,而罰金只套在
+    # 加倉那一側 —— 也就是說偏移只做了一半。Quant Arb「Advanced Market
+    # Making」§Inventory Skew 把兩種模型並排:
+    #   "One where we just stop quoting one side of the book when we have
+    #    too much inventory and the other where we skew towards 0."
+    # 我們是第一種,而他接著描述第一種怎麼死:
+    #   "if there's some net volume imbalance which persists ... you'll
+    #    basically sit at your max the entire time ... if you get close to
+    #    having to quote one sided it means you need to make your skew much
+    #    more aggressive."
+    # 2026-09-14 XPL 逐字重現:報價側別 332:0、部位 $58.7/$60、十分鐘內
+    # 95 次 `blocked by position caps`。
+    #
+    # **預設 0.0 = 今天的行為逐位元組不變。** 折讓要在設定裡明寫才生效,
+    # 因為它會讓引擎在比平常差的邊際上成交 —— 那是一個要有人決定的取捨,
+    # 不是一個可以偷偷打開的最佳化。
+    inventory_relief_frac: float
+    # 折讓之後的門檻地板。預設 0.0 = 最多降到「扣完費用剛好打平」,不會讓
+    # 引擎付錢出貨。要允許付錢平倉就把它設成負的,那同樣是人的決定。
+    inventory_min_threshold_bps: float
     # execution
     # B3 (2026-09-04) maker path. `mode` defaults to taker, so every config
     # written before B3 loads byte-for-byte identically.
@@ -699,6 +719,11 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         min_order_notional=float(_get(raw, "sizing", "min_order_notional_usd", 10.0)),
         inventory_scale_bps=float(_get(raw, "inventory", "scale_bps", 10.0)),
         inventory_floor_frac=float(_get(raw, "inventory", "floor_frac", 0.5)),
+        # 預設 0.0 -> 沒有折讓 -> _inv_add_bps 的回傳值與加這段之前完全相同。
+        inventory_relief_frac=float(
+            _get(raw, "inventory", "relief_frac", 0.0)),
+        inventory_min_threshold_bps=float(
+            _get(raw, "inventory", "min_threshold_bps", 0.0)),
         mode=mode,
         maker_venue=maker_venue,
         maker_timeout_sec=maker_timeout_sec,
