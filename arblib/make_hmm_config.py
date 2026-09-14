@@ -102,8 +102,11 @@ entropy:                      # 吃單對沖腿
   # schema 接受、解析成功,然後**安靜地忽略**。所以啟動器用 `--symbol {hsym}`,
   # 而掛單腿的 {sym} 寫在下面的 `hedge.symbol`。
   # （ANTH 一直是這個形狀：--symbol ANTH ＋ hedge.symbol: ANTHROPIC。）
-  taker_fee_bps: 4.5          # HL 基礎級 0.045%。**HIP-3 dex 的費率未查證**,
-  maker_fee_bps: 1.5          # 翻 live 之前要確認（arblib/fees.py）
+  # 2026-09-14 用 `userFees`（帶 dex 參數）逐池查證：core / io / para / xyz
+  # **四個池的費率完全相同** —— cross 0.00045 / add 0.00015。
+  # perpDexs 的 `feeRecipient` 是從基礎費裡**分成**,不是外加。
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5
   max_position_usd: {cap:.0f}
   max_orders_per_min: 30
 
