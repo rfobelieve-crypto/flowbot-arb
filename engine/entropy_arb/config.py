@@ -179,6 +179,10 @@ class Config:
     # as POSSIBLY FILLED, never as cancelled.
     cancel_timeout_sec: float
     maker_poll_sec: float
+    # 離 maker 場館觸價超過這麼多 bps 就撤單重掛。0.0 = 關閉。
+    # 邊際規則結構上看不到「我們離觸價變遠了」—— 簿口整體下移時,我們那張
+    # 賣單越來越不可能成交,但對 HL 的邊際反而變大。
+    maker_reprice_bps: float
     # Cancel a resting quote once the edge it was posted for decays below
     # this (bps, net of both fees, measured against the CURRENT hedge book).
     # The XEMM lesson inverted: they cancel when the edge gets absurdly good
@@ -378,6 +382,9 @@ _SCHEMA: Dict[str, Any] = {
         "maker_timeout_sec": float,   # B3: how long a quote may rest
         "cancel_timeout_sec": float,  # B3: the cancel's OWN budget
         "maker_poll_sec": float,      # B3: how often a resting order is read
+        # 2026-09-14：離 maker 場館觸價超過這麼多 bps 就撤單重掛。
+        # 0.0 = 關閉（預設）。理由見 engine._maker_cancel_reason。
+        "maker_reprice_bps": float,
         "maker_min_edge_bps": float,  # B3: cancel a quote whose edge decayed
         "premium_persist_sec": float,
         "cooldown_sec": float,
@@ -561,6 +568,8 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     maker_timeout_sec = float(_get(raw, "execution", "maker_timeout_sec", 5.0))
     cancel_timeout_sec = float(_get(raw, "execution", "cancel_timeout_sec", 3.0))
     maker_poll_sec = float(_get(raw, "execution", "maker_poll_sec", 0.25))
+    maker_reprice_bps = float(
+        _get(raw, "execution", "maker_reprice_bps", 0.0))
     if mode == "maker":
         for name, v in (("maker_timeout_sec", maker_timeout_sec),
                         ("cancel_timeout_sec", cancel_timeout_sec),
@@ -732,6 +741,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         maker_timeout_sec=maker_timeout_sec,
         cancel_timeout_sec=cancel_timeout_sec,
         maker_poll_sec=maker_poll_sec,
+        maker_reprice_bps=maker_reprice_bps,
         maker_min_edge_bps=float(_get(raw, "execution", "maker_min_edge_bps", 0.0)),
         premium_persist_sec=float(_get(raw, "execution", "premium_persist_sec", 0.3)),
         cooldown_sec=float(_get(raw, "execution", "cooldown_sec", 0.0)),

@@ -132,9 +132,20 @@ def make_cfg(**over):
         "midline_bps": 0.0, "upper_bps": 2.0, "lower_bps": 2.0,
         "mode": "maker", "maker_timeout_sec": 0.15, "cancel_timeout_sec": 0.1,
         "maker_poll_sec": 0.01, "max_net_base": 0.003,
+        "maker_reprice_bps": 0.0, "staleness_sec": 5.0,
         "vol_window_sec": 30.0, "vol_max_move_bps": 0.0,
         "vol_cooldown_sec": 60.0,
     }
+    unknown = set(over) - set(body)
+    if unknown:
+        # **未知的 key 以前是被安靜丟掉的。** 2026-09-14 我傳
+        # `maker_reprice_bps=2.0` 進來,它沒有出現在下面的 YAML 樣板裡,
+        # 於是設定值一直是預設的 0.0 —— 測試因此驗的是「關閉」那個分支,
+        # 而我以為在驗「開啟」。這正是 config.py 的 schema 存在要擋的那件事
+        # （打錯字不會是一個安靜沒作用的設定）,而這個鷹架繞過了它。
+        raise AssertionError(
+            "make_cfg 不認得這些參數,它們不會進到 YAML 裡:%s "
+            "—— 先把它們加進下面的樣板" % sorted(unknown))
     body.update(over)
     # never write execution logs into the repo's own logs/ directory: the
     # recorders live there and a test run must not leave rows in them
@@ -151,6 +162,8 @@ execution:
   maker_timeout_sec: {body['maker_timeout_sec']}
   cancel_timeout_sec: {body['cancel_timeout_sec']}
   maker_poll_sec: {body['maker_poll_sec']}
+  maker_reprice_bps: {body['maker_reprice_bps']}
+  staleness_sec: {body['staleness_sec']}
   premium_persist_sec: 0.0
   net_tolerance_base: 0.001
 sizing:
@@ -504,6 +517,57 @@ def test_edge_decay_cancels_the_quote():
     p, order = _drive(eng, hook)
     assert eng.entropy.cancels, "a decayed quote was left resting"
     assert "edge decayed" in order.stats.get("cancel_reason", "")
+
+
+def test_quote_that_falls_behind_the_touch_is_repriced():
+    """掛單自己的簿口跑掉了 —— 而**邊際規則看不到這件事**。
+
+    2026-09-14 實測:送出時我們永遠在觸價上或更好（AERO 100% 在觸價、
+    XPL 100% dime 一個 tick、MON 62% 剛好在觸價）,但撤單時離觸價的
+    p90 是 7–9 bps,25–48% 的單在掛著期間變更遠。`tools/missed_fills.py`
+    量到 AERO 我們那側的成交只有 3.7% 搆得到我們的價。
+
+    關鍵:maker 場館的簿口整體**遠離**我們時,對沖腿的邊際可能不降反升,
+    所以既有的 `edge decayed` 那條結構上抓不到。這一關補的就是那個缺口。
+    """
+    eng = make_engine(maker_timeout_sec=30.0, maker_reprice_bps=2.0,
+                      staleness_sec=600.0)
+
+    def hook(eng, m, t, p, o):
+        def on_poll(v, n):
+            if n == 1:
+                # maker 簿口整體往下跑:我們那張賣單被留在很上面。
+                # **對沖腿不動**,所以邊際沒變差 —— 舊規則不會撤它。
+                m.set_book(99.00, 99.02)
+        m.on_poll = on_poll
+        m.on_cancel = lambda v: setattr(v, "ex_status", "canceled")
+    p, order = _drive(eng, hook)
+    assert eng.entropy.cancels, "離觸價很遠的單被留在簿上"
+    assert "behind the touch" in order.stats.get("cancel_reason", ""), \
+        order.stats.get("cancel_reason")
+
+
+def test_reprice_defaults_off():
+    """預設 0.0 -> 同樣的情境不會因此撤單,行為與加這條之前相同。
+
+    跟上面那條共用同一個情境,只差一個設定值 —— 所以差異一定來自那個值。
+    """
+    eng = make_engine(maker_timeout_sec=30.0, staleness_sec=600.0)
+    assert eng.cfg.maker_reprice_bps == 0.0
+
+    def hook(eng, m, t, p, o):
+        def on_poll(v, n):
+            # 對沖簿**價格不動但保持新鮮**（make_engine 的原值 99.90/100.00）
+            # —— 否則 staleness 那條會先觸發,而我們要驗的正是
+            # 「對沖腿沒事、只有 maker 簿口跑掉」那個情境。
+            t.set_book(99.90, 100.00)
+            if n == 1:
+                m.set_book(99.00, 99.02)
+        m.on_poll = on_poll
+        m.on_cancel = lambda v: setattr(v, "ex_status", "canceled")
+    p, order = _drive(eng, hook)
+    assert "behind the touch" not in order.stats.get("cancel_reason", ""), \
+        "預設關閉時不該出現這個撤單理由"
 
 
 def test_partial_below_hedge_minimum_accumulates():

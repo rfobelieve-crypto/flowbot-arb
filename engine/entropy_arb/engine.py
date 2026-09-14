@@ -1356,6 +1356,38 @@ class Engine:
         if edge < cfg.maker_min_edge_bps:
             return (f"edge decayed to {edge:+.2f} bps "
                     f"(floor {cfg.maker_min_edge_bps:+.2f})")
+        # ---------------------------------------------------- 離觸價太遠了
+        # **邊際看不到這件事,而它正是漏掉成交住的地方（2026-09-14 量出來的）。**
+        #
+        # 我們送出時永遠在觸價上或更好（AERO 100% 在觸價、XPL 100% dime 了
+        # 一個 tick、MON 62% 剛好在觸價）。但掛著的期間簿口會跑掉:撤單時
+        # 離觸價的 **p90 是 7–9 bps**,而 25–48% 的單在掛著期間變得更遠。
+        # `tools/missed_fills.py` 量到的結果是 AERO 我們那側的成交只有 3.7%
+        # 搆得到我們的價 —— 不是一開始掛太遠,是**掛上去之後變遠的**。
+        #
+        # 而上面那條邊際規則**結構上看不到它**:如果 Lighter 的簿口整體下移,
+        # 我們那張賣單離觸價越來越遠、越來越不可能成交,但它對 HL 的邊際
+        # 反而變大 —— 引擎會覺得這張單越來越好。`max_edge_bps` 那條
+        # （「邊際突然變超好 = 我們才是過期的那張」）方向對,但它是一個
+        # 絕對門檻（MON 設 300),對 9 bps 的漂移完全不會響。
+        #
+        # Quant Arb「Analysing Real Fills」的方法論裡是一句帶過的前提:
+        #   "If we quoted 30 orders (since we are **trying to stay on BBO**)"
+        # 他們持續重新定價待在 BBO 上,而我們坐滿 maker_timeout_sec
+        # （MON 實測:290 張裡 173 張是被 20 秒逾時撤掉的）。
+        #
+        # **預設 0.0 = 關閉,行為與加這段之前逐位元組相同。**
+        away = cfg.maker_reprice_bps
+        if away > 0:
+            mb, ma = maker_v.book.best_bid(), maker_v.book.best_ask()
+            if mb and ma and ma > mb:
+                mid = (mb + ma) / 2.0
+                behind = ((order.px - ma) if not order.is_buy
+                          else (mb - order.px)) / mid * 1e4
+                if behind > away:
+                    return (f"{behind:.1f} bps behind the touch "
+                            f"(reprice at {away:.1f}) — a quote this far back "
+                            f"does not fill, and the edge rule cannot see it")
         # Stolen from XEMM and pointed at a RESTING order, where it belongs:
         # an edge that suddenly looks wonderful usually means our own quote
         # is the stale one and somebody is about to take it.
