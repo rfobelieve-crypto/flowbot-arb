@@ -161,7 +161,12 @@ def test_recording_family_configs_have_no_ws_ping():
     hmm = {"config_HMM_GMX.yaml", "config_MET.yaml",
            "config_OPENAI.yaml", "config_ANSEM.yaml", "config_MINIMAX.yaml",
            "config_GRAM.yaml", "config_CHIP.yaml", "config_MNT.yaml",
-           "config_FIL.yaml", "config_AERO.yaml", "config_XPL.yaml"}
+           "config_FIL.yaml", "config_AERO.yaml", "config_XPL.yaml",
+           # 第五次：MON（2026-09-14 晚間）。這一列每次都是在加 HMM 設定時
+           # 才動的 —— 它順帶記著「這條線換過幾個標的」,而那個計數本身
+           # 就是資訊。這次跟前四次不同的地方:MON 是**兩側檢驗**選出來的,
+           # 而 XPL/AERO 都是被那一關擋掉的。
+           "config_MON.yaml"}
     changed = [os.path.basename(p)
                for p in glob.glob(os.path.join(ROOT, "config_*.yaml"))
                if os.path.basename(p) not in hmm

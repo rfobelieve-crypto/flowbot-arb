@@ -353,6 +353,9 @@ _SCHEMA: Dict[str, Any] = {
     "inventory": {
         "scale_bps": float,
         "floor_frac": float,
+        # 2026-09-14：減倉側的折讓。兩個都預設 0.0,不寫就沒有行為變化。
+        "relief_frac": float,
+        "min_threshold_bps": float,
     },
     "risk": {
         "max_net_base": float,      # B4/G1: hard cap on |leg A + leg B|

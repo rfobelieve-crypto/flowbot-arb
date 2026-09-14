@@ -1,0 +1,163 @@
+# MON —— HMM 候選（2026-09-14 由 arblib/make_hmm_config.py **從量測生成**）
+#
+# **不要用複製的方式改這份檔。** 下面每一個價格相依的數字都是從當天的
+# 價格與步長算出來的；複製到另一個標的上它們全部失去意義,而且不會報錯。
+# 換標的請重跑產生器（mistake.md 2026-09-14）。
+#
+# 生成當下的量測：
+#   Lighter MON   價格 0.02338   步長 0.1 顆   日成交額 $139,090
+#   HL MON      價格 0.023412   步長 1 顆   maxLeverage 5x
+#   價格偏離 0.14%（>5% 就是同名不同資產,不是溢價）
+#   一張單 $15 = 641.574 顆｜殘餘量子 1 顆 = $0.0234
+
+entropy:                      # 吃單對沖腿
+  dex: ''
+  # **這一腿的 symbol 不在這裡,在 `--symbol`。** config.py:591 對 HL 腿寫的是
+  # `symbol=symbol`（CLI 的那個）—— 寫在 YAML 裡的 `entropy.symbol` 會被
+  # schema 接受、解析成功,然後**安靜地忽略**。所以啟動器用 `--symbol MON`,
+  # 而掛單腿的 MON 寫在下面的 `hedge.symbol`。
+  # （ANTH 一直是這個形狀：--symbol ANTH ＋ hedge.symbol: ANTHROPIC。）
+  # 2026-09-14 用 `userFees`（帶 dex 參數）逐池查證：core / io / para / xyz
+  # **四個池的費率完全相同** —— cross 0.00045 / add 0.00015。
+  # perpDexs 的 `feeRecipient` 是從基礎費裡**分成**,不是外加。
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5
+  max_position_usd: 60
+  max_orders_per_min: 30
+
+hedge:                        # 掛單腿（execution.maker_venue: hedge）
+  symbol: MON
+  taker_fee_bps: 2.8          # Lighter PREMIUM
+  maker_fee_bps: 0.4          # ← 這條腿掛單,這才是我們實際付的
+  max_position_usd: 60
+  max_orders_per_min: 60
+
+thresholds:
+  # **候選之間刻意保持一致。** G2（兩側可做性）直接受它影響 ——
+  # 換一個門檻就換一個答案,所以要比較候選，這三行不可以逐標的調。
+  midline_bps: 0.0
+  upper_bps: 3.0
+  lower_bps: 3.0
+
+sizing:
+  take_fraction: 0.5
+  # 維持 15 而理由不是深度：對沖腿實測吃得下三十到四十倍
+  # （GMX bid 中位 $819 / MET $516,自己中價 5 bps 內）。
+  # 綁束是 M2（成交率）與 M3（逆選擇）都還沒量 —— 它們才是每張單的真實
+  # 成本。放大一個還沒量過的東西不是放大收益。
+  max_order_notional_usd: 15
+  min_order_notional_usd: 10   # 場館下限 $10.00
+
+inventory:
+  scale_bps: 10.0
+  floor_frac: 0
+  # **MON 是第一個開折讓的設定（2026-09-14）,而它是為了一個算得出來的
+  # 數字開的,不是「試試看」。**
+  #
+  # 兩側檢驗（arblib/hmm_universe.py）量到 MON:
+  #     賣側 +8.69 bps   買側 +2.29 bps   基差 +3.20
+  # 買側是**正的**,只是低於 band（upper_bps 3.0）0.71 bps。所以沒有折讓的
+  # 話,引擎只報賣側 -> 庫存單向堆到 $60/腿 -> 停住。XPL 就是這樣死的
+  # （報價側別 332:0、十分鐘 95 次 blocked by position caps）,差別是 XPL
+  # 的買側是 **-6.47**，怎麼折讓都救不回來,而 MON 只差 0.71。
+  #
+  # 折讓 = relief_frac x scale_bps x u（floor_frac 0,所以從 0 就開始長）。
+  # 要在庫存 u 時讓買側門檻降到 2.29:
+  #     0.1 x 10 x u >= 0.71   ->   u >= 0.71
+  # 也就是**庫存到七成上限時買側開火**,然後它自己穩在那裡。
+  #
+  # **可否證的預測**:MON 的庫存會在約 0.7 x $60 = $42 /腿 附近來回,
+  # 不會像 XPL 那樣貼在上限。如果它照樣貼上限,是這個機制沒作用,查它。
+  relief_frac: 0.1
+  # 地板 0.0 = 扣完費用剛好打平。這裡不會碰到（買側 +2.29 > 0）,留著是
+  # 因為它擋的是「庫存壓力大到讓引擎自動虧錢平倉」那條路。
+  min_threshold_bps: 0.0
+
+execution:
+  mode: maker
+  maker_venue: hedge
+  maker_timeout_sec: 20.0
+  cancel_timeout_sec: 3.0
+  maker_poll_sec: 0.25
+  # **撤單門檻必須低於進場門檻**（upper_bps 3.0）,否則掛上去的下一個
+  # tick 就被自己撤掉。取一半：邊際掉到剩一半就不值得繼續佔著那個價位。
+  # 2026-09-14 之前這裡寫死 5.0 而帶是 15,看起來沒事；帶改成 3.0 之後
+  # 5.0 就會變成「掛上即撤」—— 兩個數字是綁在一起的,不可以只改一個。
+  maker_min_edge_bps: 1.5
+  premium_persist_sec: 2.0
+  cooldown_sec: 0.0
+  # 30 秒 ＋ 5 秒心跳：Lighter 的 feed 不會自己證明存活,而 staleness 比的是
+  # alive_ts。實測沒有心跳時 24.6% 的訊框空檔超過 10 秒,GMX 因此十五分鐘
+  # 就 HALT（TODO §1.41b）。
+  staleness_sec: 30.0
+  ws_ping_sec: 5.0
+  reconcile_sec: 15.0
+  settle_timeout_sec: 10.0
+  leg_slippage_bps: 50.0
+  hedge_slippage_bps: 20.0
+  # 2 x 殘餘量子（1 顆）。對沖之後兩腿的殘差只能是量子的整數倍,
+  # 所以小於一個量子的容忍值**永遠滿足不了**。
+  net_tolerance_base: 2
+  max_consecutive_errors: 3
+  rate_limit_pause_sec: 10.0
+  venue_probe_sec: 30.0
+  # 2026-09-14：10.0 -> 50.0。**這條是 WAF 預算的最大單一消耗者。**
+  #
+  # 它唯一的工作是讓下單路徑的 TLS 連線不要斷,而連線池的
+  # `keepalive_timeout` 是 **75 秒**（engine.py:210）。每 10 秒 ping 一次
+  # 是需要的 7.5 倍 —— 每支引擎兩腿 6 req/分,七支 shadow 就是 84 req/分,
+  # 而九支 record-only 加起來才 18（`_http_keepalive_loop` 只在
+  # `not record_only` 時起）。
+  #
+  # 實測後果：2026-09-14 每十分鐘整,八支引擎在三十秒內全部被擋一次,
+  # 每次 60 秒（`API recovered after 60s outage`）—— 10% 的時間不能交易,
+  # 而它擋的是**重連**,那時引擎手上有部位。
+  #
+  # 50 秒留 25 秒餘裕（75 - 50）,足夠吸收一次丟包與重試,
+  # 同時把消耗降到原本的 1/5。
+  http_keepalive_sec: 50.0
+
+risk:
+  # **必須 < 一張單**（641.574 顆）：它擋的是「對沖完全失敗」,
+  # 而那時 net 正好是一張單（engine.py:1478 —— _maybe_hedge 在報價結算後
+  # 才查,立即對沖已經試過）。也要高過粉塵（1 顆）。
+  # 這裡 = 0.25 張單 = 491.873 顆 = $11.50 = 492 個量子。
+  max_net_base: 491.873
+  max_daily_loss_usd: 10.0
+  max_gross_usd: 130
+  # 單一市場紀律：第二個 live 行程會讓 account_budget.py 的 B3 變紅。
+  max_account_gross_usd: 70.0
+  min_account_free_usd: 25.0
+  max_consecutive_stale: 20
+  max_stale_episodes: 5
+  halt_flatten_attempts: 3
+  max_edge_bps: 300.0
+  vol_window_sec: 60.0
+  vol_max_move_bps: 300.0
+  vol_cooldown_sec: 60.0
+  unexplained_position_halt: true
+
+control:
+  # B5 控制通道。**沒有 Telegram 憑證時它照樣可用**：
+  #     echo flat  > logs/MON/control.cmd     全平並保持暫停
+  #     echo pause > logs/MON/control.cmd     停開新倉,對沖照跑
+  # 每 2 秒輪詢,讀完即清空(殘留指令不會在重啟後再平一次倉)。
+  # 它**不能**解除 HALT —— 解除 HALT 只能靠重啟,那是刻意的。
+  #
+  # **為什麼一定要逐配對(2026-09-14 翻 live 前查到的)**：預設值是
+  # `control.cmd`,相對於 cwd,而這台機器上十幾個引擎的 cwd 全是 arb/engine,
+  # 讀取端又是 `r+` 之後 truncate —— `echo flat > control.cmd` 會被**先搶到
+  # 的那一個**吃掉,而真正在送單的那個拿到它的機率是 1/N。
+  # 那不是一個需要的時候用得上的開關,而「需要的時候用得上」是它唯一的意義。
+  command_file: logs/MON/control.cmd
+  poll_sec: 2.0
+
+logging:
+  dashboard: false
+  level: INFO
+  file: logs/MON/engine.log
+  trades_csv: logs/MON/trades.csv
+
+recorder:
+  enabled: true
+  csv: logs/MON/minutes.csv
