@@ -2,6 +2,8 @@
 REM entropy-arb record-only runner (BTC) - restart loop
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --record-only --symbol BTC --hedge lighter-rh --config config_BTC.yaml --no-dashboard >> logs\BTC\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

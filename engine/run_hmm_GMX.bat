@@ -22,6 +22,8 @@ REM byte-offset bookkeeping cmd.exe uses to read a .bat and it silently
 REM skips lines, exit code 0 (mistake.md 2026-09-13).
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --shadow --symbol GMX --hedge lighter --config config_HMM_GMX.yaml --no-dashboard >> logs\GMX\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

@@ -28,13 +28,15 @@ REM
 REM WHAT STOPS IT, no Telegram needed:
 REM   echo flat  > logs\AERO\control.cmd    close everything, stay paused
 REM   echo pause > logs\AERO\control.cmd    stop opening, keep hedging
-REM STOP ORDER MATTERS (this was got wrong on 2026-09-14 and the watchdog
-REM relaunched a live engine for 2h21m unattended):
-REM   1. echo flat, wait for it to settle
-REM   2. comment this member out of ops\arb_watchdog.ps1
-REM   3. only then kill the processes
-REM   4. wait past one watchdog cycle (>5 min) and check it is still gone -
-REM      an immediately-empty process list is NOT evidence
+REM HOW TO STOP IT (one action, not a remembered sequence):
+REM   1. echo flat > logs\AERO\control.cmd   (while the engine is alive - it needs the signer)
+REM   2. type nul > logs\stop\%~n0.stop
+REM      Both restarters read that file: this loop exits at the gate
+REM      below, and arb_watchdog.ps1 will not relaunch. Delete it to
+REM      resume. Killing python alone does NOT stop anything - the cmd
+REM      wrapper relaunches it 30s later, which on 2026-09-14 kept a
+REM      retired scanner alive for 21 hours (139 Lighter REST calls per
+REM      sweep = that day's ten-minute disconnect cycle).
 REM If a residual ends up below the venue minimum:
 REM   python tools\flatten_residual.py --symbol AERO --config config_AERO.yaml
 REM
@@ -48,6 +50,8 @@ REM
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines (2026-09-13).
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --symbol AERO --hedge lighter --config config_AERO.yaml --no-dashboard >> logs\AERO\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

@@ -10,6 +10,8 @@ REM TO GO LIVE: remove the shadow flag. Needs the user to say so again.
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines.
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --shadow --symbol MNT --hedge lighter --config config_MNT.yaml --no-dashboard >> logs\MNT\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

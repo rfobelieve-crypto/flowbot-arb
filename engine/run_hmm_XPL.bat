@@ -14,15 +14,20 @@ REM are STRUCTURALLY unmeasurable there. A ten-hour clean shadow run told
 REM us nothing about whether live would even start (it would not: the HL
 REM SDK was not installed).
 REM
-REM STOP ORDER MATTERS:
-REM   1. echo flat > logs\XPL\control.cmd   (while the engine is alive)
-REM   2. comment this member out of ops\arb_watchdog.ps1
-REM   3. only then kill the processes
-REM   4. wait past one watchdog cycle (>5 min) and re-check -- an
-REM      immediately-empty process list is NOT evidence
+REM HOW TO STOP IT (one action, not a remembered sequence):
+REM   1. echo flat > logs\XPL\control.cmd   (while the engine is alive - it needs the signer)
+REM   2. type nul > logs\stop\%~n0.stop
+REM      Both restarters read that file: this loop exits at the gate
+REM      below, and arb_watchdog.ps1 will not relaunch. Delete it to
+REM      resume. Killing python alone does NOT stop anything - the cmd
+REM      wrapper relaunches it 30s later, which on 2026-09-14 kept a
+REM      retired scanner alive for 21 hours (139 Lighter REST calls per
+REM      sweep = that day's ten-minute disconnect cycle).
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines.
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --symbol XPL --hedge lighter --config config_XPL.yaml --no-dashboard >> logs\XPL\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

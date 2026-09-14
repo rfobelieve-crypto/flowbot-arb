@@ -35,6 +35,8 @@ REM
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines (2026-09-13).
 cd /d C:\Users\rfo\Desktop\flowbot\arb\engine
 :loop
+if exist logs\stop\%~n0.stop goto end
 python main.py --symbol MET --hedge lighter --config config_MET.yaml --no-dashboard >> logs\MET\runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end

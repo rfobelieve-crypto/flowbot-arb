@@ -156,18 +156,55 @@ $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
          ForEach-Object { [string]$_.CommandLine }
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
 $dead = @()
+$stopped = @()
 foreach ($name in $Members.Keys) {
   $sig, $bat = $Members[$name]
   $alive = @($procs | Where-Object { $_ -like "*main.py*$sig*" -or ($name -in 'universe' -and $_ -like "*$sig*") }).Count
   if ($alive -ge 1) { continue }
+
+  # STOP 閘門（2026-09-14）。這個系統有**兩套**重拉機制 —— .bat 自己的
+  # `:loop` + `timeout 30` + `goto loop`，以及這裡。兩套做同一件事，於是
+  # 「停止」變成六個動作，而其中兩個沒有任何當下的回饋：
+  #   flat -> 註解這張表 -> 殺 python -> 殺 cmd 包裝層 -> 等 5 分鐘 -> 複查
+  # 2026-09-14 我漏掉第四步兩次，後果是一支已搬到 Railway 的掃描器多跑了
+  # 21 小時（每輪 139 次 Lighter REST = 那天「每十分鐘斷線」的來源），
+  # 以及一支已退場的 shadow 引擎多跑了十小時。
+  #
+  # 所以把「這支該不該跑」變成一個檔案，兩個重拉者都讀它：
+  #   logs\stop\<啟動器檔名>.stop
+  # .bat 那側的閘門是同一條路徑（`if exist logs\stop\%~n0.stop goto end`）。
+  # 停止 = 建一個檔案；恢復 = 刪掉它。**一個看得見的狀態，不是一串要記得
+  # 的動作** —— 這是 mistake.md 反覆講的那條：判準寫成產物，不要寫成程序。
+  #
+  # 註冊表這張表**仍然是權威**（不在表上的東西沒人拉）；STOP 檔是「在表上，
+  # 但現在刻意不要跑」，它的好處是不必改程式碼、而且 .bat 那側也看得到。
+  $stopFile = Join-Path $Root ('logs\stop\' +
+              [IO.Path]::GetFileNameWithoutExtension($bat) + '.stop')
+  if (Test-Path $stopFile) { $stopped += $name; continue }
+
   $dead += $name
   if (-not $DryRun) {
     Start-Process -FilePath (Join-Path $Root $bat) -WorkingDirectory $Root -WindowStyle Minimized
   }
 }
-$line = if ($dead.Count -eq 0) { "$stamp UTC  all $($Members.Count) alive" }
-        elseif ($DryRun)      { "$stamp UTC  DRY-RUN would relaunch: $($dead -join ',')" }
-        else                  { "$stamp UTC  RELAUNCHED: $($dead -join ',')" }
+$nRun = $Members.Count - $stopped.Count
+$line = if ($dead.Count -eq 0 -and $stopped.Count -eq 0) {
+          "$stamp UTC  all $($Members.Count) alive"
+        } elseif ($dead.Count -eq 0) {
+          # 被 STOP 檔停掉的成員**沒有**活著。沿用 "all N alive" 會讓一個
+          # 刻意停掉的東西跟一個健康的東西印出同一行字,而那正是這支腳本
+          # 存在要擋的事（mistake.md：未知/停止狀態不可以長得像已知的好狀態）。
+          "$stamp UTC  $nRun/$($Members.Count) alive"
+        } elseif ($DryRun) {
+          "$stamp UTC  DRY-RUN would relaunch: $($dead -join ',')"
+        } else {
+          "$stamp UTC  RELAUNCHED: $($dead -join ',')"
+        }
+if ($stopped.Count -gt 0) {
+  # 刻意印出來：一個被 STOP 檔停掉的成員，跟一個「活著」的成員在
+  # "all N alive" 那一行裡長得一模一樣,而它們是完全不同的狀態。
+  $line = $line + "  | STOPPED by flag: " + ($stopped -join ',')
+}
 Add-Content -Path $Log -Value $line -Encoding UTF8
 Write-Output $line
 
