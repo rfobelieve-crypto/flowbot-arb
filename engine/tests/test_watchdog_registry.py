@@ -90,6 +90,13 @@ def test_every_hmm_launcher_is_registered():
         # 跑不起來的策略拉起來送真單。啟動器留著當紀錄，取代者是 FIL。
         "run_hmm_MET.bat":
             "2026-09-14 退場：成交切片 $0.27 vs 對沖最小單 $10，做不了 HMM",
+        # 2026-09-14 FIL 停用：一小時 0 成交、只報價 2 次。不是壞掉 ——
+        # 淨邊際 +0.46 bps 貼在損益平衡線上（Lighter 半價差 7.86 − HL 2.5
+        # − 費用 4.90），所以引擎大部分時間不報價是對的。
+        # **這個豁免有恢復條件**：判準修好（G1 改成淨值、M3 改基準）之後
+        # 重篩，若 FIL 仍在名單上就把看門狗那行放回去、這裡刪掉。
+        "run_hmm_FIL.bat":
+            "2026-09-14 停用：淨 +0.46 bps 貼損益平衡線，一小時 0 成交",
     }
     missing = sorted(on_disk - known - set(EXEMPT))
     assert not missing, "這些啟動器沒有登記在看門狗裡：%s" % missing

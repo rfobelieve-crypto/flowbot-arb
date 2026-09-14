@@ -1,54 +1,54 @@
 {
- "asof_utc": "2026-09-14 07:06",
+ "asof_utc": "2026-09-14 08:06",
  "gate_days": 7,
  "pairs": {
   "SNDK": {
    "pair": "SNDK",
    "legs": "Entropy io:SNDK vs lighter-rh SNDK",
    "note": "stock perp (original)",
-   "minutes": 23942,
+   "minutes": 24002,
    "start_utc": "2026-08-28 10:28",
-   "days": 16.86,
+   "days": 16.9,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 4.156,
-      "band_bps": 4.156,
-      "fires": 2395,
+      "p90_bps": 4.135,
+      "band_bps": 4.135,
+      "fires": 2401,
       "fires_per_day": 142.1
      },
      "halves": [
       {
-       "p90_bps": 1.946,
-       "band_bps": 1.946,
-       "fires": 1199,
-       "fires_per_day": 143.5
+       "p90_bps": 1.944,
+       "band_bps": 1.944,
+       "fires": 1201,
+       "fires_per_day": 143.4
       },
       {
-       "p90_bps": 7.531,
-       "band_bps": 7.531,
-       "fires": 1198,
-       "fires_per_day": 140.8
+       "p90_bps": 7.524,
+       "band_bps": 7.524,
+       "fires": 1201,
+       "fires_per_day": 140.9
       }
      ],
      "convergence": {
-      "episodes": 64,
-      "converged_4h": 57,
+      "episodes": 66,
+      "converged_4h": 59,
       "frac": 0.89,
-      "median_minutes": 12.5,
+      "median_minutes": 12.0,
       "passed": true
      },
      "depth": {
-      "instrumented_min": 23685,
-      "fat_prints": 2368,
+      "instrumented_min": 23745,
+      "fat_prints": 2374,
       "fat_median_notional_usd": 200.0,
       "fat_stale_gt5s": 0
      },
      "capturable_usd_per_day": 0.16,
-     "capturable_usd_per_day_ceiling": 11.81,
+     "capturable_usd_per_day_ceiling": 11.75,
      "passed": true,
      "fee_venues": [
       "IO",
@@ -56,8 +56,8 @@
      ],
      "required_band_bps_with_rebate": 24.7,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": -10.27,
-     "net_bps_per_trade_schedule": -12.52,
+     "net_bps_per_trade_with_rebate": -10.28,
+     "net_bps_per_trade_schedule": -12.53,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -65,23 +65,23 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 10.215,
-      "band_bps": 10.215,
-      "fires": 2395,
+      "p90_bps": 10.201,
+      "band_bps": 10.201,
+      "fires": 2401,
       "fires_per_day": 142.1
      },
      "halves": [
       {
-       "p90_bps": 7.929,
-       "band_bps": 7.929,
-       "fires": 1198,
+       "p90_bps": 7.926,
+       "band_bps": 7.926,
+       "fires": 1201,
        "fires_per_day": 143.4
       },
       {
-       "p90_bps": 12.541,
-       "band_bps": 12.541,
-       "fires": 1198,
-       "fires_per_day": 140.8
+       "p90_bps": 12.537,
+       "band_bps": 12.537,
+       "fires": 1201,
+       "fires_per_day": 140.9
       }
      ],
      "convergence": {
@@ -92,8 +92,8 @@
       "passed": false
      },
      "depth": {
-      "instrumented_min": 23685,
-      "fat_prints": 2368,
+      "instrumented_min": 23745,
+      "fat_prints": 2374,
       "fat_median_notional_usd": 220.0,
       "fat_stale_gt5s": 0
      },
@@ -106,8 +106,8 @@
      ],
      "required_band_bps_with_rebate": 24.7,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": -7.24,
-     "net_bps_per_trade_schedule": -9.49,
+     "net_bps_per_trade_with_rebate": -7.25,
+     "net_bps_per_trade_schedule": -9.5,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -132,32 +132,32 @@
    "pair": "NBIS",
    "legs": "Entropy io:NBIS vs lighter NBIS",
    "note": "stock perp",
-   "minutes": 20808,
+   "minutes": 20868,
    "start_utc": "2026-08-30 14:36",
-   "days": 14.69,
+   "days": 14.73,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 28.265,
-      "band_bps": 28.265,
-      "fires": 2082,
-      "fires_per_day": 141.8
+      "p90_bps": 28.253,
+      "band_bps": 28.253,
+      "fires": 2087,
+      "fires_per_day": 141.7
      },
      "halves": [
       {
-       "p90_bps": 25.012,
-       "band_bps": 25.012,
-       "fires": 1041,
+       "p90_bps": 25.04,
+       "band_bps": 25.04,
+       "fires": 1044,
        "fires_per_day": 143.3
       },
       {
-       "p90_bps": 29.741,
-       "band_bps": 29.741,
-       "fires": 1041,
-       "fires_per_day": 140.3
+       "p90_bps": 29.64,
+       "band_bps": 29.64,
+       "fires": 1046,
+       "fires_per_day": 140.5
       }
      ],
      "convergence": {
@@ -168,13 +168,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20808,
-      "fat_prints": 2080,
+      "instrumented_min": 20868,
+      "fat_prints": 2086,
       "fat_median_notional_usd": 274.0,
       "fat_stale_gt5s": 27
      },
      "capturable_usd_per_day": 0.08,
-     "capturable_usd_per_day_ceiling": 109.82,
+     "capturable_usd_per_day_ceiling": 109.69,
      "passed": true,
      "fee_venues": [
       "IO",
@@ -189,40 +189,40 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 8.402,
-      "band_bps": 8.402,
-      "fires": 2081,
+      "p90_bps": 8.395,
+      "band_bps": 8.395,
+      "fires": 2087,
       "fires_per_day": 141.7
      },
      "halves": [
       {
-       "p90_bps": 11.731,
-       "band_bps": 11.731,
-       "fires": 1041,
+       "p90_bps": 11.723,
+       "band_bps": 11.723,
+       "fires": 1044,
        "fires_per_day": 143.3
       },
       {
-       "p90_bps": -5.465,
+       "p90_bps": -5.22,
        "band_bps": 1.0,
-       "fires": 341,
-       "fires_per_day": 45.9
+       "fires": 361,
+       "fires_per_day": 48.5
       }
      ],
      "convergence": {
-      "episodes": 99,
-      "converged_4h": 93,
+      "episodes": 101,
+      "converged_4h": 95,
       "frac": 0.94,
-      "median_minutes": 13.0,
+      "median_minutes": 12.5,
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20808,
-      "fat_prints": 2080,
+      "instrumented_min": 20868,
+      "fat_prints": 2086,
       "fat_median_notional_usd": 398.0,
       "fat_stale_gt5s": 2
      },
-     "capturable_usd_per_day": 1.13,
-     "capturable_usd_per_day_ceiling": 47.38,
+     "capturable_usd_per_day": 1.15,
+     "capturable_usd_per_day_ceiling": 47.34,
      "passed": true,
      "fee_venues": [
       "IO",
@@ -252,32 +252,32 @@
    "pair": "ANTH",
    "legs": "Entropy io:ANTH vs lighter-rh ANTHROPIC",
    "note": "private-co perp, no spot anchor",
-   "minutes": 20819,
+   "minutes": 20879,
    "start_utc": "2026-08-30 14:36",
-   "days": 14.69,
+   "days": 14.73,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 360.877,
-      "band_bps": 360.877,
-      "fires": 2082,
+      "p90_bps": 360.18,
+      "band_bps": 360.18,
+      "fires": 2088,
       "fires_per_day": 141.8
      },
      "halves": [
       {
-       "p90_bps": 22.358,
-       "band_bps": 22.358,
-       "fires": 1042,
-       "fires_per_day": 143.4
+       "p90_bps": 22.764,
+       "band_bps": 22.764,
+       "fires": 1044,
+       "fires_per_day": 143.2
       },
       {
-       "p90_bps": 535.498,
-       "band_bps": 535.498,
-       "fires": 1041,
-       "fires_per_day": 140.3
+       "p90_bps": 535.292,
+       "band_bps": 535.292,
+       "fires": 1044,
+       "fires_per_day": 140.4
       }
      ],
      "convergence": {
@@ -288,8 +288,8 @@
       "passed": false
      },
      "depth": {
-      "instrumented_min": 20819,
-      "fat_prints": 2081,
+      "instrumented_min": 20879,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 152.0,
       "fat_stale_gt5s": 1
      },
@@ -302,8 +302,8 @@
      ],
      "required_band_bps_with_rebate": 24.7,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": 168.09,
-     "net_bps_per_trade_schedule": 165.84,
+     "net_bps_per_trade_with_rebate": 167.74,
+     "net_bps_per_trade_schedule": 165.49,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -311,35 +311,35 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 38.25,
-      "band_bps": 38.25,
-      "fires": 2082,
+      "p90_bps": 38.105,
+      "band_bps": 38.105,
+      "fires": 2089,
       "fires_per_day": 141.8
      },
      "halves": [
       {
-       "p90_bps": 6.143,
-       "band_bps": 6.143,
-       "fires": 1041,
+       "p90_bps": 5.855,
+       "band_bps": 5.855,
+       "fires": 1044,
        "fires_per_day": 143.2
       },
       {
-       "p90_bps": 79.429,
-       "band_bps": 79.429,
-       "fires": 1041,
-       "fires_per_day": 140.3
+       "p90_bps": 79.354,
+       "band_bps": 79.354,
+       "fires": 1044,
+       "fires_per_day": 140.4
       }
      ],
      "convergence": {
-      "episodes": 7,
-      "converged_4h": 3,
-      "frac": 0.43,
-      "median_minutes": 264.0,
+      "episodes": 8,
+      "converged_4h": 4,
+      "frac": 0.5,
+      "median_minutes": 108.0,
       "passed": false
      },
      "depth": {
-      "instrumented_min": 20819,
-      "fat_prints": 2081,
+      "instrumented_min": 20879,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 96.0,
       "fat_stale_gt5s": 3
      },
@@ -352,8 +352,8 @@
      ],
      "required_band_bps_with_rebate": 24.7,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": 6.78,
-     "net_bps_per_trade_schedule": 4.53,
+     "net_bps_per_trade_with_rebate": 6.7,
+     "net_bps_per_trade_schedule": 4.45,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -378,32 +378,32 @@
    "pair": "BTC",
    "legs": "HL BTC vs lighter-rh BTC",
    "note": "CONTROL - band expected ~0",
-   "minutes": 20818,
+   "minutes": 20878,
    "start_utc": "2026-08-30 14:36",
-   "days": 14.69,
+   "days": 14.73,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 5.383,
-      "band_bps": 5.383,
-      "fires": 2082,
-      "fires_per_day": 141.8
+      "p90_bps": 5.376,
+      "band_bps": 5.376,
+      "fires": 2090,
+      "fires_per_day": 141.9
      },
      "halves": [
       {
        "p90_bps": 6.109,
        "band_bps": 6.109,
        "fires": 1045,
-       "fires_per_day": 143.8
+       "fires_per_day": 143.4
       },
       {
-       "p90_bps": 3.314,
-       "band_bps": 3.314,
-       "fires": 1042,
-       "fires_per_day": 140.5
+       "p90_bps": 3.321,
+       "band_bps": 3.321,
+       "fires": 1044,
+       "fires_per_day": 140.4
       }
      ],
      "convergence": {
@@ -414,13 +414,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20818,
-      "fat_prints": 2081,
+      "instrumented_min": 20878,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 999.0,
       "fat_stale_gt5s": 0
      },
      "capturable_usd_per_day": 0.02,
-     "capturable_usd_per_day_ceiling": 76.25,
+     "capturable_usd_per_day_ceiling": 76.21,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -439,21 +439,21 @@
      "full": {
       "p90_bps": 2.124,
       "band_bps": 2.124,
-      "fires": 2087,
-      "fires_per_day": 142.1
+      "fires": 2090,
+      "fires_per_day": 141.9
      },
      "halves": [
       {
-       "p90_bps": 1.495,
-       "band_bps": 1.495,
+       "p90_bps": 1.497,
+       "band_bps": 1.497,
        "fires": 1044,
-       "fires_per_day": 143.6
+       "fires_per_day": 143.2
       },
       {
-       "p90_bps": 2.473,
-       "band_bps": 2.473,
-       "fires": 1041,
-       "fires_per_day": 140.3
+       "p90_bps": 2.472,
+       "band_bps": 2.472,
+       "fires": 1044,
+       "fires_per_day": 140.4
       }
      ],
      "convergence": {
@@ -464,13 +464,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20818,
-      "fat_prints": 2081,
+      "instrumented_min": 20878,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 1000.0,
       "fat_stale_gt5s": 1
      },
-     "capturable_usd_per_day": 1.27,
-     "capturable_usd_per_day_ceiling": 30.18,
+     "capturable_usd_per_day": 1.26,
+     "capturable_usd_per_day_ceiling": 30.14,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -504,32 +504,32 @@
    "pair": "HYPE",
    "legs": "HL HYPE vs lighter-rh HYPE",
    "note": "thin crypto; largest funding gap on 09-01",
-   "minutes": 17909,
+   "minutes": 17969,
    "start_utc": "2026-09-01 15:04",
-   "days": 12.67,
+   "days": 12.71,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 8.272,
-      "band_bps": 8.272,
-      "fires": 1791,
+      "p90_bps": 8.266,
+      "band_bps": 8.266,
+      "fires": 1797,
       "fires_per_day": 141.4
      },
      "halves": [
       {
-       "p90_bps": 9.802,
-       "band_bps": 9.802,
-       "fires": 896,
+       "p90_bps": 9.788,
+       "band_bps": 9.788,
+       "fires": 899,
        "fires_per_day": 143.1
       },
       {
-       "p90_bps": 4.292,
-       "band_bps": 4.292,
-       "fires": 896,
-       "fires_per_day": 139.8
+       "p90_bps": 4.276,
+       "band_bps": 4.276,
+       "fires": 899,
+       "fires_per_day": 139.9
       }
      ],
      "convergence": {
@@ -540,13 +540,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 17909,
-      "fat_prints": 1790,
+      "instrumented_min": 17969,
+      "fat_prints": 1796,
       "fat_median_notional_usd": 430.0,
       "fat_stale_gt5s": 1
      },
      "capturable_usd_per_day": 0.08,
-     "capturable_usd_per_day_ceiling": 50.3,
+     "capturable_usd_per_day_ceiling": 50.26,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -554,8 +554,8 @@
      ],
      "required_band_bps_with_rebate": 29.2,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": -10.46,
-     "net_bps_per_trade_schedule": -10.46,
+     "net_bps_per_trade_with_rebate": -10.47,
+     "net_bps_per_trade_schedule": -10.47,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -565,21 +565,21 @@
      "full": {
       "p90_bps": 5.816,
       "band_bps": 5.816,
-      "fires": 1793,
-      "fires_per_day": 141.5
+      "fires": 1799,
+      "fires_per_day": 141.6
      },
      "halves": [
       {
-       "p90_bps": 2.892,
-       "band_bps": 2.892,
-       "fires": 896,
+       "p90_bps": 2.881,
+       "band_bps": 2.881,
+       "fires": 899,
        "fires_per_day": 143.1
       },
       {
-       "p90_bps": 7.043,
-       "band_bps": 7.043,
-       "fires": 896,
-       "fires_per_day": 139.8
+       "p90_bps": 7.036,
+       "band_bps": 7.036,
+       "fires": 899,
+       "fires_per_day": 139.9
       }
      ],
      "convergence": {
@@ -590,13 +590,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 17909,
-      "fat_prints": 1790,
-      "fat_median_notional_usd": 587.0,
+      "instrumented_min": 17969,
+      "fat_prints": 1796,
+      "fat_median_notional_usd": 593.0,
       "fat_stale_gt5s": 1
      },
      "capturable_usd_per_day": 0.35,
-     "capturable_usd_per_day_ceiling": 48.31,
+     "capturable_usd_per_day_ceiling": 48.84,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -630,32 +630,32 @@
    "pair": "ZEC",
    "legs": "HL ZEC vs lighter-rh ZEC",
    "note": "thin crypto",
-   "minutes": 20819,
+   "minutes": 20879,
    "start_utc": "2026-08-30 14:36",
-   "days": 14.69,
+   "days": 14.73,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 10.751,
-      "band_bps": 10.751,
-      "fires": 2082,
-      "fires_per_day": 141.8
+      "p90_bps": 10.747,
+      "band_bps": 10.747,
+      "fires": 2090,
+      "fires_per_day": 141.9
      },
      "halves": [
       {
-       "p90_bps": 8.062,
-       "band_bps": 8.062,
-       "fires": 1041,
+       "p90_bps": 8.083,
+       "band_bps": 8.083,
+       "fires": 1044,
        "fires_per_day": 143.2
       },
       {
-       "p90_bps": 12.642,
-       "band_bps": 12.642,
-       "fires": 1041,
-       "fires_per_day": 140.3
+       "p90_bps": 12.638,
+       "band_bps": 12.638,
+       "fires": 1045,
+       "fires_per_day": 140.5
       }
      ],
      "convergence": {
@@ -666,13 +666,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20819,
-      "fat_prints": 2081,
+      "instrumented_min": 20879,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 997.0,
       "fat_stale_gt5s": 1
      },
      "capturable_usd_per_day": 0.18,
-     "capturable_usd_per_day_ceiling": 151.99,
+     "capturable_usd_per_day_ceiling": 152.04,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -680,8 +680,8 @@
      ],
      "required_band_bps_with_rebate": 29.2,
      "required_band_bps_schedule": 29.2,
-     "net_bps_per_trade_with_rebate": -9.22,
-     "net_bps_per_trade_schedule": -9.22,
+     "net_bps_per_trade_with_rebate": -9.23,
+     "net_bps_per_trade_schedule": -9.23,
      "fee_unverified_legs": [
       "lighter-rh"
      ],
@@ -689,22 +689,22 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 8.863,
-      "band_bps": 8.863,
-      "fires": 2082,
+      "p90_bps": 8.855,
+      "band_bps": 8.855,
+      "fires": 2088,
       "fires_per_day": 141.8
      },
      "halves": [
       {
-       "p90_bps": 9.953,
-       "band_bps": 9.953,
-       "fires": 1041,
+       "p90_bps": 9.956,
+       "band_bps": 9.956,
+       "fires": 1044,
        "fires_per_day": 143.2
       },
       {
-       "p90_bps": 7.147,
-       "band_bps": 7.147,
-       "fires": 1041,
+       "p90_bps": 7.125,
+       "band_bps": 7.125,
+       "fires": 1044,
        "fires_per_day": 140.3
       }
      ],
@@ -716,13 +716,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20819,
-      "fat_prints": 2081,
-      "fat_median_notional_usd": 750.0,
+      "instrumented_min": 20879,
+      "fat_prints": 2087,
+      "fat_median_notional_usd": 751.0,
       "fat_stale_gt5s": 0
      },
      "capturable_usd_per_day": 0.34,
-     "capturable_usd_per_day_ceiling": 94.26,
+     "capturable_usd_per_day_ceiling": 94.3,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -756,32 +756,32 @@
    "pair": "NEAR",
    "legs": "HL NEAR vs lighter-rh NEAR",
    "note": "thin crypto",
-   "minutes": 20814,
+   "minutes": 20874,
    "start_utc": "2026-08-30 14:36",
-   "days": 14.69,
+   "days": 14.73,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 10.261,
-      "band_bps": 10.261,
-      "fires": 2082,
+      "p90_bps": 10.25,
+      "band_bps": 10.25,
+      "fires": 2089,
       "fires_per_day": 141.8
      },
      "halves": [
       {
-       "p90_bps": 11.962,
-       "band_bps": 11.962,
-       "fires": 1041,
+       "p90_bps": 11.954,
+       "band_bps": 11.954,
+       "fires": 1044,
        "fires_per_day": 143.2
       },
       {
-       "p90_bps": 5.287,
-       "band_bps": 5.287,
-       "fires": 1042,
-       "fires_per_day": 140.5
+       "p90_bps": 5.255,
+       "band_bps": 5.255,
+       "fires": 1044,
+       "fires_per_day": 140.4
       }
      ],
      "convergence": {
@@ -792,13 +792,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20814,
-      "fat_prints": 2081,
+      "instrumented_min": 20874,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 316.0,
       "fat_stale_gt5s": 1
      },
      "capturable_usd_per_day": 0.03,
-     "capturable_usd_per_day_ceiling": 45.98,
+     "capturable_usd_per_day_ceiling": 45.93,
      "passed": true,
      "fee_venues": [
       "HL",
@@ -817,21 +817,21 @@
      "full": {
       "p90_bps": 5.656,
       "band_bps": 5.656,
-      "fires": 2082,
+      "fires": 2088,
       "fires_per_day": 141.8
      },
      "halves": [
       {
-       "p90_bps": -1.586,
+       "p90_bps": -1.584,
        "band_bps": 1.0,
-       "fires": 396,
-       "fires_per_day": 54.5
+       "fires": 399,
+       "fires_per_day": 54.7
       },
       {
-       "p90_bps": 7.622,
-       "band_bps": 7.622,
-       "fires": 1041,
-       "fires_per_day": 140.4
+       "p90_bps": 7.617,
+       "band_bps": 7.617,
+       "fires": 1045,
+       "fires_per_day": 140.5
       }
      ],
      "convergence": {
@@ -842,12 +842,12 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 20814,
-      "fat_prints": 2081,
+      "instrumented_min": 20874,
+      "fat_prints": 2087,
       "fat_median_notional_usd": 400.0,
       "fat_stale_gt5s": 1
      },
-     "capturable_usd_per_day": 1.06,
+     "capturable_usd_per_day": 1.05,
      "capturable_usd_per_day_ceiling": 32.08,
      "passed": true,
      "fee_venues": [
@@ -882,40 +882,40 @@
    "pair": "GOLD_LL",
    "legs": "lighter XAU vs lighter-rh XAU",
    "note": "zero-fee both legs; gold index (not PAXG)",
-   "minutes": 14956,
+   "minutes": 15015,
    "start_utc": "2026-09-03 16:51",
-   "days": 10.59,
+   "days": 10.64,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 7.735,
-      "band_bps": 7.735,
-      "fires": 1497,
-      "fires_per_day": 141.3
+      "p90_bps": 7.733,
+      "band_bps": 7.733,
+      "fires": 1502,
+      "fires_per_day": 141.2
      },
      "halves": [
       {
-       "p90_bps": 8.078,
-       "band_bps": 8.078,
-       "fires": 749,
-       "fires_per_day": 144.1
+       "p90_bps": 8.075,
+       "band_bps": 8.075,
+       "fires": 751,
+       "fires_per_day": 143.9
       },
       {
-       "p90_bps": 7.482,
-       "band_bps": 7.482,
-       "fires": 748,
-       "fires_per_day": 138.6
+       "p90_bps": 7.478,
+       "band_bps": 7.478,
+       "fires": 751,
+       "fires_per_day": 138.7
       }
      ],
      "convergence": {
       "episodes": 0
      },
      "depth": {
-      "instrumented_min": 14956,
-      "fat_prints": 1495,
+      "instrumented_min": 15015,
+      "fat_prints": 1501,
       "fat_median_notional_usd": 498.0,
       "fat_stale_gt5s": 0
      },
@@ -937,23 +937,23 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 0.253,
+      "p90_bps": 0.277,
       "band_bps": 1.0,
-      "fires": 1283,
+      "fires": 1288,
       "fires_per_day": 121.1
      },
      "halves": [
       {
-       "p90_bps": -1.581,
+       "p90_bps": -1.592,
        "band_bps": 1.0,
        "fires": 1,
        "fires_per_day": 0.2
       },
       {
-       "p90_bps": 3.475,
-       "band_bps": 3.475,
-       "fires": 748,
-       "fires_per_day": 138.6
+       "p90_bps": 3.473,
+       "band_bps": 3.473,
+       "fires": 752,
+       "fires_per_day": 138.8
       }
      ],
      "convergence": {
@@ -964,8 +964,8 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 14956,
-      "fat_prints": 1495,
+      "instrumented_min": 15015,
+      "fat_prints": 1501,
       "fat_median_notional_usd": 523.0,
       "fat_stale_gt5s": 1
      },
@@ -1004,49 +1004,49 @@
    "pair": "NVDA_LL",
    "legs": "lighter NVDA vs lighter-rh NVDA",
    "note": "zero-fee both legs; stock perp",
-   "minutes": 14955,
+   "minutes": 15014,
    "start_utc": "2026-09-03 16:51",
-   "days": 10.59,
+   "days": 10.64,
    "gate_days": 7,
    "gate_met": true,
    "status": "verdict",
    "sides": {
     "sell": {
      "full": {
-      "p90_bps": 0.774,
+      "p90_bps": 0.773,
       "band_bps": 1.0,
       "fires": 1179,
-      "fires_per_day": 111.3
+      "fires_per_day": 110.9
      },
      "halves": [
       {
        "p90_bps": 1.034,
        "band_bps": 1.034,
-       "fires": 750,
-       "fires_per_day": 144.3
+       "fires": 751,
+       "fires_per_day": 143.9
       },
       {
-       "p90_bps": 0.55,
+       "p90_bps": 0.549,
        "band_bps": 1.0,
-       "fires": 411,
-       "fires_per_day": 76.2
+       "fires": 410,
+       "fires_per_day": 75.7
       }
      ],
      "convergence": {
-      "episodes": 501,
-      "converged_4h": 497,
+      "episodes": 503,
+      "converged_4h": 498,
       "frac": 0.99,
       "median_minutes": 4.0,
       "passed": true
      },
      "depth": {
-      "instrumented_min": 14955,
-      "fat_prints": 1495,
+      "instrumented_min": 15014,
+      "fat_prints": 1501,
       "fat_median_notional_usd": 267.0,
       "fat_stale_gt5s": 13
      },
      "capturable_usd_per_day": 0.63,
-     "capturable_usd_per_day_ceiling": 2.97,
+     "capturable_usd_per_day_ceiling": 2.96,
      "passed": true,
      "fee_venues": [
       "lighter",
@@ -1063,23 +1063,23 @@
     },
     "buy": {
      "full": {
-      "p90_bps": 4.131,
-      "band_bps": 4.131,
-      "fires": 1496,
+      "p90_bps": 4.141,
+      "band_bps": 4.141,
+      "fires": 1502,
       "fires_per_day": 141.2
      },
      "halves": [
       {
-       "p90_bps": 3.382,
-       "band_bps": 3.382,
-       "fires": 748,
-       "fires_per_day": 143.9
+       "p90_bps": 3.379,
+       "band_bps": 3.379,
+       "fires": 752,
+       "fires_per_day": 144.1
       },
       {
-       "p90_bps": 4.44,
-       "band_bps": 4.44,
-       "fires": 748,
-       "fires_per_day": 138.6
+       "p90_bps": 4.465,
+       "band_bps": 4.465,
+       "fires": 751,
+       "fires_per_day": 138.7
       }
      ],
      "convergence": {
@@ -1090,13 +1090,13 @@
       "passed": true
      },
      "depth": {
-      "instrumented_min": 14955,
-      "fat_prints": 1495,
-      "fat_median_notional_usd": 282.0,
+      "instrumented_min": 15014,
+      "fat_prints": 1501,
+      "fat_median_notional_usd": 277.0,
       "fat_stale_gt5s": 14
      },
      "capturable_usd_per_day": 0.02,
-     "capturable_usd_per_day_ceiling": 16.45,
+     "capturable_usd_per_day_ceiling": 16.2,
      "passed": true,
      "fee_venues": [
       "lighter",
@@ -1127,46 +1127,46 @@
    "passed_at_fee": false
   }
  },
- "minutes": 23942,
- "days": 16.86,
+ "minutes": 24002,
+ "days": 16.9,
  "gate_met": true,
  "sides": {
   "sell": {
    "full": {
-    "p90_bps": 4.156,
-    "band_bps": 4.156,
-    "fires": 2395,
+    "p90_bps": 4.135,
+    "band_bps": 4.135,
+    "fires": 2401,
     "fires_per_day": 142.1
    },
    "halves": [
     {
-     "p90_bps": 1.946,
-     "band_bps": 1.946,
-     "fires": 1199,
-     "fires_per_day": 143.5
+     "p90_bps": 1.944,
+     "band_bps": 1.944,
+     "fires": 1201,
+     "fires_per_day": 143.4
     },
     {
-     "p90_bps": 7.531,
-     "band_bps": 7.531,
-     "fires": 1198,
-     "fires_per_day": 140.8
+     "p90_bps": 7.524,
+     "band_bps": 7.524,
+     "fires": 1201,
+     "fires_per_day": 140.9
     }
    ],
    "convergence": {
-    "episodes": 64,
-    "converged_4h": 57,
+    "episodes": 66,
+    "converged_4h": 59,
     "frac": 0.89,
-    "median_minutes": 12.5,
+    "median_minutes": 12.0,
     "passed": true
    },
    "depth": {
-    "instrumented_min": 23685,
-    "fat_prints": 2368,
+    "instrumented_min": 23745,
+    "fat_prints": 2374,
     "fat_median_notional_usd": 200.0,
     "fat_stale_gt5s": 0
    },
    "capturable_usd_per_day": 0.16,
-   "capturable_usd_per_day_ceiling": 11.81,
+   "capturable_usd_per_day_ceiling": 11.75,
    "passed": true,
    "fee_venues": [
     "IO",
@@ -1174,8 +1174,8 @@
    ],
    "required_band_bps_with_rebate": 24.7,
    "required_band_bps_schedule": 29.2,
-   "net_bps_per_trade_with_rebate": -10.27,
-   "net_bps_per_trade_schedule": -12.52,
+   "net_bps_per_trade_with_rebate": -10.28,
+   "net_bps_per_trade_schedule": -12.53,
    "fee_unverified_legs": [
     "lighter-rh"
    ],
@@ -1183,23 +1183,23 @@
   },
   "buy": {
    "full": {
-    "p90_bps": 10.215,
-    "band_bps": 10.215,
-    "fires": 2395,
+    "p90_bps": 10.201,
+    "band_bps": 10.201,
+    "fires": 2401,
     "fires_per_day": 142.1
    },
    "halves": [
     {
-     "p90_bps": 7.929,
-     "band_bps": 7.929,
-     "fires": 1198,
+     "p90_bps": 7.926,
+     "band_bps": 7.926,
+     "fires": 1201,
      "fires_per_day": 143.4
     },
     {
-     "p90_bps": 12.541,
-     "band_bps": 12.541,
-     "fires": 1198,
-     "fires_per_day": 140.8
+     "p90_bps": 12.537,
+     "band_bps": 12.537,
+     "fires": 1201,
+     "fires_per_day": 140.9
     }
    ],
    "convergence": {
@@ -1210,8 +1210,8 @@
     "passed": false
    },
    "depth": {
-    "instrumented_min": 23685,
-    "fat_prints": 2368,
+    "instrumented_min": 23745,
+    "fat_prints": 2374,
     "fat_median_notional_usd": 220.0,
     "fat_stale_gt5s": 0
    },
@@ -1224,8 +1224,8 @@
    ],
    "required_band_bps_with_rebate": 24.7,
    "required_band_bps_schedule": 29.2,
-   "net_bps_per_trade_with_rebate": -7.24,
-   "net_bps_per_trade_schedule": -9.49,
+   "net_bps_per_trade_with_rebate": -7.25,
+   "net_bps_per_trade_schedule": -9.5,
    "fee_unverified_legs": [
     "lighter-rh"
    ],

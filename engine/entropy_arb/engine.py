@@ -1331,6 +1331,12 @@ class Engine:
             order.stats.setdefault("first_fill_ts", time.time())
             if order.stats.get("mid_at_fill") is None:
                 order.stats["mid_at_fill"] = taker_v.book.mid()
+            # M3 要的是**掛單腿**的 mid，不是對沖腿的（markout.py 檔頭第 2 點：
+            # 逆選擇發生在我們掛單的那本簿口上）。上面那個 taker 的 mid 是
+            # 給別的用途的，兩個都留著，名字分開 —— 2026-09-14 差一點就
+            # 直接拿 taker 的去算，那會把兩所的基差混進逆選擇裡。
+            if order.stats.get("maker_mid_at_fill") is None:
+                order.stats["maker_mid_at_fill"] = maker_v.book.mid()
             log.warning("[QUOTE FILL] %s %s %.6g of %.6g @%.6g (%s) — hedging",
                         maker_v.name, "BUY" if order.is_buy else "SELL",
                         order.filled_base, order.qty, px, order.status or "-")
@@ -1486,7 +1492,8 @@ class Engine:
             self.mark.record(
                 ts=st.get("first_fill_ts") or time.time(),
                 px=order.fill_px, usd=filled * order.fill_px,
-                maker_is_buy=plan.maker_is_buy)
+                maker_is_buy=plan.maker_is_buy,
+                mid=st.get("maker_mid_at_fill"))
         elif outcome == "cancelled":
             self.maker_cancels += 1
         log.info("[QUOTE DONE] %s — %s", outcome, order.describe())

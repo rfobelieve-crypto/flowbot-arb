@@ -25,15 +25,37 @@ HMM 是做市不是套利 —— 它靠**兩側輪流成交**把庫存做掉。p
 ===========================================================================
 用**掛單腿**（HMM 的 `maker_venue: hedge`，也就是 Lighter 那側）：
 
-    G1 價差   掛單腿半價差中位 >= 5.0 bps
-              低於這個，扣掉 4.9 bps 的來回費就沒東西了
+    G1 淨值   **淨邊際 > 3.0 bps**（2026-09-14 改，見下）
+                 淨 = 掛單腿半價差 - 對沖腿半價差 - 費用(0.40+4.50)
     G2 兩側   少數側可做的分鐘佔比 >= 20%
-              「可做」= 該側的 edge_mean_bps > 0。20% = 一天約 5 小時
-              可以做另一邊，庫存才轉得動
+              「可做」= 引擎自己的 shadow.csv 決策側別
     G3 流量   掛單腿有成交的分鐘佔比 >= 30%
-              簿口深但沒人交易 = 對做市是餓死（CLAUDE.md §HFT 的原話）
+    G4 切片   **中位成交切片 >= 對沖腿最小單（$10）**（2026-09-14 新增）
+    G5 雙向   **吃單流少數側 >= 35%**（2026-09-14 新增）
 
-三關都過才是候選。**不挑格、不事後換門檻。**
+五關都過才是候選。**不挑格、不事後換門檻。**
+
+===========================================================================
+2026-09-14：G1 改了，而且是三次實盤打出來的
+===========================================================================
+舊的 G1 是「半價差 >= 5.0 bps」，理由寫著「扣掉 4.9 bps 的來回費就沒東西」。
+**那句話漏了對沖腿自己的半價差**：我們是吃單過去的，要穿過 HL 的價差。
+
+    真正的損益平衡 = HL 半價差(~2.5) + 0.40 + 4.50 = **7.4 bps**
+
+所以**舊的 G1 門檻本身就低於損益平衡線**，它放行了一整類必虧的市場。
+FIL 半價差 7.86 -> 舊 G1 過，實盤跑一小時只報價 2 次、0 成交，
+因為淨邊際只有 +0.46 bps，引擎自己的 `maker_min_edge_bps` 把它擋掉了。
+
+G4 / G5 也是實盤打出來的，而且它們解釋了 MET 與 CHIP：
+
+    MET  中位成交切片 $0.27（對沖腿最小單 $10）-> 97% 的成交對沖不掉
+         吃單流 93.1% 是買方 -> 實盤 121 筆成交**全部是 SELL**，
+         買單掛了 82 次一次都沒成交
+    CHIP 切片 $0.03、吃單流 97.4% 單向 —— 比 MET 更極端
+
+**G3 對這兩件事是瞎的**：它數「有成交的分鐘」，而灰塵流每分鐘都有成交。
+一個每分鐘成交三十次、每次 $0.27 的市場，G3 滿分。
 
 ===========================================================================
 對照組（已知答案；它們不對就是這支儀器壞了，不是市場有事）
@@ -66,13 +88,54 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOGS = os.path.join(os.path.dirname(HERE), "engine", "logs")
 
 # 判準（凍結）
-G1_HALF_SPREAD_BPS = 5.0
+# 2026-09-14：G1 從「半價差 >= 5」改成「淨值 > 3」。舊門檻低於損益平衡線
+# （7.4 bps），系統性放行必虧的市場 —— 見檔頭。
+HL_HALF_SPREAD_BPS = 2.5      # 對沖腿的半價差,我們吃單要穿過它
+FEES_BPS = 0.40 + 4.50        # Lighter maker + HL taker
+G1_NET_BPS = 3.0              # 扣完之後還要剩這麼多才值得做
 G2_MINORITY_PCT = 20.0
 G3_FLOW_PCT = 30.0
+G4_MIN_SLICE_USD = 10.0       # 對沖腿最小單；切片比它小就對沖不掉
+G5_TAKER_MINORITY_PCT = 35.0  # 吃單流的少數側；單向流只會打到我們一側
+
+# G4 / G5 的資料來源：flow_system 錄的 Lighter 逐筆成交帶。
+# **讀不到就印「未量」,不是通過** —— 未知不可以長得像已知
+# （mistake.md 2026-09-13）。
+TAPE_DIR = os.path.join("D:", os.sep, "flowbot_data", "lighter", "trades")
 
 # 錄製器的腿身分（從 config_*.yaml 讀出來的，寫死避免每次解析 YAML）
 # entropy=hl 的那些：hedge 腿是 Lighter；GOLD_LL / NVDA_LL 兩腿都在 Lighter。
 BOTH_LIGHTER = {"GOLD_LL", "NVDA_LL"}
+
+
+def tape_stats(pair):
+    """從 Lighter 逐筆成交帶量 G4（切片）與 G5（吃單流雙向）。
+
+    `is_maker_ask=True` = 掛單方在賣側 = **吃單方在買**。我們掛的買單只有在
+    對面有人主動賣時才會成交,所以吃單流單向 = 一側的掛單永遠不會成交
+    （MET 實盤：吃單買 93.1%,買單掛 82 次成交 0 次）。
+
+    讀不到就回 (None, None) —— 呼叫端印「未量」,不是通過。
+    """
+    import glob
+    try:
+        import pandas as pd
+    except ImportError:
+        return None, None
+    fs = sorted(glob.glob(os.path.join(TAPE_DIR, "*", "*.parquet")))
+    if not fs:
+        return None, None
+    try:
+        df = pd.concat([pd.read_parquet(f, columns=["coin", "usd", "is_maker_ask"])
+                        for f in fs[-24:]], ignore_index=True)
+    except Exception:
+        return None, None
+    d = df[df["coin"] == pair]
+    if len(d) < 100:            # 樣本太少就不要假裝量得出來
+        return None, None
+    slice_med = float(d["usd"].median())
+    buy = float(d["is_maker_ask"].mean()) * 100.0
+    return slice_med, min(buy, 100.0 - buy)
 
 
 def f(row, key):
@@ -182,16 +245,27 @@ def screen(pair):
     flow_pct = sum(1 for x in flow if x > 0) / n * 100.0
     flow_med = st.median([x for x in flow if x > 0]) if any(flow) else 0.0
 
-    g1 = st.median(hs) >= G1_HALF_SPREAD_BPS if hs else False
+    # G1：**淨值**,不是半價差。我們吃單對沖要穿過對沖腿的價差,
+    # 所以損益平衡是 HL 半價差 + 費用 = 7.4 bps,而舊門檻寫 5.0。
+    half = st.median(hs) if hs else float("nan")
+    net = (half - HL_HALF_SPREAD_BPS - FEES_BPS) if hs else float("nan")
+    slice_med, taker_minority = tape_stats(pair)
+
+    g1 = bool(hs) and net > G1_NET_BPS
     g2 = (minority is not None) and minority >= G2_MINORITY_PCT
     g3 = flow_pct >= G3_FLOW_PCT
+    # **未量 != 通過**（mistake.md 2026-09-13：未知不可以長得像已知）
+    g4 = (slice_med is not None) and slice_med >= G4_MIN_SLICE_USD
+    g5 = (taker_minority is not None) and taker_minority >= G5_TAKER_MINORITY_PCT
     return dict(pair=pair, n=n,
-                half_spread=st.median(hs) if hs else float("nan"),
+                half_spread=half, net_bps=net,
                 sell_pct=sell_ok, buy_pct=buy_ok,
                 minority=minority, prem_med=st.median(prem) if prem else 0.0,
                 balance=bal, cross_per_day=cross_per_day,
                 flow_pct=flow_pct, flow_med=flow_med,
-                g1=g1, g2=g2, g3=g3, passed=(g1 and g2 and g3))
+                slice_med=slice_med, taker_minority=taker_minority,
+                g1=g1, g2=g2, g3=g3, g4=g4, g5=g5,
+                passed=(g1 and g2 and g3 and g4 and g5))
 
 
 def main(argv=None) -> int:
@@ -206,19 +280,22 @@ def main(argv=None) -> int:
     if not out:
         raise RuntimeError("一個配對都讀不到 —— 空輸出在這裡不是合法狀態")
 
-    print("HMM 標的篩選｜掛單腿 = hedge｜判準凍結："
-          "G1 半價差>=%.1fbps  G2 少數側>=%.0f%%  G3 有成交分鐘>=%.0f%%"
-          % (G1_HALF_SPREAD_BPS, G2_MINORITY_PCT, G3_FLOW_PCT))
+    print("HMM 標的篩選｜掛單腿 = hedge｜判準凍結（2026-09-14 改版）：")
+    print("  G1 淨值>%.1fbps（半價差 − HL %.1f − 費用 %.1f）  G2 少數側>=%.0f%%"
+          "  G3 有成交分鐘>=%.0f%%  G4 切片>=$%.0f  G5 吃單流少數側>=%.0f%%"
+          % (G1_NET_BPS, HL_HALF_SPREAD_BPS, FEES_BPS, G2_MINORITY_PCT,
+             G3_FLOW_PCT, G4_MIN_SLICE_USD, G5_TAKER_MINORITY_PCT))
     print()
-    print("%-9s %5s  %8s %6s %6s %7s  %8s %7s  %7s %9s   %s"
-          % ("配對", "分鐘", "半價差", "賣側%", "買側%", "少數側%",
-             "prem中位", "翻轉/日", "有成交%", "成交$/分", "判定"))
-    print("-" * 108)
+    print("%-9s %5s %8s %8s %7s %7s %9s %9s   %s"
+          % ("配對", "分鐘", "半價差", "淨bps", "少數側%", "有成交%",
+             "切片中位$", "吃單少數%", "判定"))
+    print("-" * 92)
     for r in sorted(out, key=lambda x: (-x["passed"],
                                        -(x["minority"] if x["minority"]
                                          is not None else -1))):
         mark = "".join(["1" if r["g1"] else "-", "2" if r["g2"] else "-",
-                        "3" if r["g3"] else "-"])
+                        "3" if r["g3"] else "-", "4" if r["g4"] else "-",
+                        "5" if r["g5"] else "-"])
         note = ""
         if r["pair"] == "BTC":
             note = "  <- 控制組"
@@ -226,11 +303,12 @@ def main(argv=None) -> int:
             note = "  <- 現行標的"
         if r["pair"] in BOTH_LIGHTER:
             note += "（兩腿都 Lighter）"
-        fmt = lambda v: ("%6.1f" % v) if v is not None else "   未量"
-        print("%-9s %5d  %8.2f %s %s %s  %8.1f %7.1f  %7.1f %9.0f   %s%s"
-              % (r["pair"], r["n"], r["half_spread"], fmt(r["sell_pct"]),
-                 fmt(r["buy_pct"]), fmt(r["minority"]), r["prem_med"],
-                 r["cross_per_day"], r["flow_pct"], r["flow_med"],
+        fmt = lambda v, w=7: (("%%%d.1f" % w) % v) if v is not None             else ("%%%ds" % w) % "未量"
+        fmt2 = lambda v: ("%9.2f" % v) if v is not None else "     未量"
+        print("%-9s %5d %8.2f %8.2f %s %7.1f %s %s   %s%s"
+              % (r["pair"], r["n"], r["half_spread"], r["net_bps"],
+                 fmt(r["minority"]), r["flow_pct"], fmt2(r["slice_med"]),
+                 fmt(r["taker_minority"], 9),
                  "PASS " + mark if r["passed"] else "過 " + mark, note))
 
     # ---- 對照組：已知答案。不對就是這支壞了 ----
