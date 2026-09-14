@@ -63,7 +63,22 @@ LIGHTER = "https://mainnet.zklighter.elliot.ai"
 
 CLIP_USD = 15.0
 MIN_USD = 10.0
-BAND_BPS = 15.0
+# 2026-09-14：15.0 -> 3.0。**這不是調參數,是把兩處不一致的地方對齊。**
+#
+# `engine._eff_threshold` 回傳 `midline + upper`,而它的 docstring 寫著
+# 「Net hurdle (bps, **on top of fees**)」—— 也就是**淨邊際要超過這個數
+# 才報價**。而 `hmm_screen` / `hmm_universe` 的 G1 判準是「淨 > 3.0 bps
+# 才值得做」。兩者量的是同一件事,卻差五倍：
+#
+#     篩選說「這個市場淨 3.8 bps,可以做」-> 引擎說「低於 15,不動」
+#
+# 15 是為 GMX 訂的（那個市場的淨邊際 89 bps）,然後被複製到每一份設定。
+# 這跟 max_net_base 從 GMX 複製到 MET 是同一個病：**一個為某個市場量身
+# 的數字被當成常數**。AERO 實測淨 3.8 bps、FIL 2.4 —— 兩個都被 15 擋死,
+# 而 FIL 一小時只報價 2 次就是這個原因,不是它壞掉。
+#
+# 對齊到 G1_NET_BPS。要改就兩邊一起改,否則篩選選出來的東西引擎不會做。
+BAND_BPS = 3.0
 CAP_USD = 60.0
 
 
@@ -165,7 +180,11 @@ execution:
   maker_timeout_sec: 20.0
   cancel_timeout_sec: 3.0
   maker_poll_sec: 0.25
-  maker_min_edge_bps: 5.0
+  # **撤單門檻必須低於進場門檻**（upper_bps {band:.1f}）,否則掛上去的下一個
+  # tick 就被自己撤掉。取一半：邊際掉到剩一半就不值得繼續佔著那個價位。
+  # 2026-09-14 之前這裡寫死 5.0 而帶是 15,看起來沒事；帶改成 3.0 之後
+  # 5.0 就會變成「掛上即撤」—— 兩個數字是綁在一起的,不可以只改一個。
+  maker_min_edge_bps: {floor:.1f}
   premium_persist_sec: 2.0
   cooldown_sec: 0.0
   # 30 秒 ＋ 5 秒心跳：Lighter 的 feed 不會自己證明存活,而 staleness 比的是
@@ -183,7 +202,21 @@ execution:
   max_consecutive_errors: 3
   rate_limit_pause_sec: 10.0
   venue_probe_sec: 30.0
-  http_keepalive_sec: 10.0
+  # 2026-09-14：10.0 -> 50.0。**這條是 WAF 預算的最大單一消耗者。**
+  #
+  # 它唯一的工作是讓下單路徑的 TLS 連線不要斷,而連線池的
+  # `keepalive_timeout` 是 **75 秒**（engine.py:210）。每 10 秒 ping 一次
+  # 是需要的 7.5 倍 —— 每支引擎兩腿 6 req/分,七支 shadow 就是 84 req/分,
+  # 而九支 record-only 加起來才 18（`_http_keepalive_loop` 只在
+  # `not record_only` 時起）。
+  #
+  # 實測後果：2026-09-14 每十分鐘整,八支引擎在三十秒內全部被擋一次,
+  # 每次 60 秒（`API recovered after 60s outage`）—— 10% 的時間不能交易,
+  # 而它擋的是**重連**,那時引擎手上有部位。
+  #
+  # 50 秒留 25 秒餘裕（75 - 50）,足夠吸收一次丟包與重試,
+  # 同時把消耗降到原本的 1/5。
+  http_keepalive_sec: 50.0
 
 risk:
   # **必須 < 一張單**（{clip_base:.6g} 顆）：它擋的是「對沖完全失敗」,
@@ -310,7 +343,8 @@ def build(sym, dex, hsym):
                 quantum=quantum, quantum_usd=quantum * lpx,
                 mnb=round(mnb, 8), mnb_usd=mnb * lpx,
                 quanta=mnb / quantum, tol=round(2.0 * quantum, 8),
-                band=BAND_BPS, cap=CAP_USD, gross=CAP_USD * 2 + 10,
+                band=BAND_BPS, floor=BAND_BPS / 2.0,
+                cap=CAP_USD, gross=CAP_USD * 2 + 10,
                 minord=max(MIN_USD, vmin), vmin=vmin)
 
 

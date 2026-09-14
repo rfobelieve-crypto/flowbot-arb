@@ -43,14 +43,26 @@ $Members = [ordered]@{
   # arblib/make_hmm_config.py **從量測生成**，不是複製的。
   # HL **core** 上的候選（2026-09-14）：不用動任何資金 —— HIP-3 的
   # io/para/xyz 是獨立保證金池而且都是 $0.00，core 有 $98.30。
-  'GRAM'    = @('--symbol GRAM ',    'run_recorder_GRAM.bat')
-  'CHIP'    = @('--symbol CHIP ',    'run_recorder_CHIP.bat')
-  'MNT'     = @('--symbol MNT ',     'run_recorder_MNT.bat')
+  # ***** 2026-09-14 18:2x：以下七支 shadow 全部停用。*****
+  # 理由不是「先省資源」,是**它們產不出還需要的東西**：
+  #   OPENAI/ANSEM/MINIMAX  ok=False「ACCOUNT OUT OF MARGIN」——
+  #     HIP-3 的 io/para/xyz 池都是 $0.00,它們永遠不可能成交,決策數 0。
+  #   GRAM   決策 0（價差太窄,一次都沒報過價）
+  #   MNT    決策 94、CHIP 3018、GMX 18216 —— 三個都已被新的五關判掉
+  #     （CHIP 切片 $0.03、吃單流 97.4% 單向；GMX 市場一天成交 45 筆）
+  # 而它們同時是 WAF 預算的主要消耗者：`_http_keepalive_loop` 只在
+  # `not record_only` 時起,所以 shadow 每 10 秒打一次兩腿,
+  # 七支就是 84 req/分,而九支 record-only 加起來才 18。
+  # **九支 record-only 留著** —— 它們餵 §0.75 的 minutes.csv,而且很省。
+  # 要重開哪一支,先讓它過 arblib/hmm_universe.py 的關。
+  # 'GRAM'    = @('--symbol GRAM ',    'run_recorder_GRAM.bat')
+  # 'CHIP'    = @('--symbol CHIP ',    'run_recorder_CHIP.bat')
+  # 'MNT'     = @('--symbol MNT ',     'run_recorder_MNT.bat')
   # OPENAI 的 CLI 旗標是 **OAI**（HL 側 io:OAI）,不是 OPENAI ——
   # config.py 對 HL 腿用 CLI 的 symbol,而兩所對同一資產叫不同名字。
-  'OPENAI'  = @('--symbol OAI ',     'run_recorder_OPENAI.bat')
-  'ANSEM'   = @('--symbol ANSEM ',   'run_recorder_ANSEM.bat')
-  'MINIMAX' = @('--symbol MINIMAX ', 'run_recorder_MINIMAX.bat')
+  # 'OPENAI'  = @('--symbol OAI ',     'run_recorder_OPENAI.bat')
+  # 'ANSEM'   = @('--symbol ANSEM ',   'run_recorder_ANSEM.bat')
+  # 'MINIMAX' = @('--symbol MINIMAX ', 'run_recorder_MINIMAX.bat')
   # ***** MET（Meteora）—— 這一個在送真單。2026-09-14 起。*****
   # 使用者當天第二次明確授權（第 9 次 override 寫著「翻成 live 要使用者再
   # 說一次」）。從 record-only 換成 live 的理由不是它過了 G2（少數側 18.8%
@@ -106,9 +118,14 @@ $Members = [ordered]@{
   # 引擎拉回來跑了 2 小時 21 分無人看管）：
   #   1) echo flat > logs\AERO\control.cmd  2) 註解掉這一行
   #   3) 才殺行程  4) **跨過一個 5 分鐘週期再確認一次** —— 當下回空不是證據
-  'AERO'    = @('--symbol AERO ', 'run_hmm_AERO.bat')
+  # AERO 2026-09-14 18:20 停用。**不是壞掉,是它的邊際在我們上線後蒸發了**：
+  # 上線時 Lighter 半價差中位 10.57 bps,一小時後塌到 5.31 ->
+  # 淨 5.31 - HL 1.31 - 費用 4.90 = **-0.90 bps**,引擎正確地停止報價。
+  # 一小時 122 張報價、2 筆成交（都在最初 26 秒）、帳戶淨 -$0.016。
+  # 留著只會消耗共用的 WAF 預算。判準已改（G6 淨值/sigma@延遲）,重篩再說。
+  # 'AERO'    = @('--symbol AERO ', 'run_hmm_AERO.bat')
   # HMM（對沖做市）Stage 1。現在是 record-only；翻 live 只改 .bat。
-  'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
+  # 'HMM_GMX' = @('--symbol GMX ', 'run_hmm_GMX.bat')
   # 'scanner' 2026-09-13 退出這張表 —— 掃描器搬到 Railway 了（docs/DEPLOY.md §6）。
   # 搬家的理由是 per-IP 的 WAF 預算：掃描器一支 65 次/分，是十支引擎合計的十六倍，
   # 而它擋住的是**引擎的重連**，那時引擎手上有部位。**本機不可以再起第二支** ——
