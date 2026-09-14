@@ -2581,9 +2581,26 @@ class Engine:
             if d:
                 os.makedirs(d, exist_ok=True)
             if os.path.exists(path):
+                # **先關檔,再改名。** `os.replace` 原本寫在這個 `with` 區塊
+                # 裡面,而 Windows 不准對一個自己還開著的檔案改名（Python 的
+                # `open()` 不帶 FILE_SHARE_DELETE）-> WinError 32。POSIX 上
+                # 改名一個開著的檔完全合法 —— 所以這是**平台特定的靜默失效**,
+                # 而下面那個 `except` 把它吞掉。後果不是「輪替晚一點」:
+                #
+                #     表頭變了 -> 改名拋例外 -> 被 except 接住
+                #     -> 這一列沒寫成 -> 而**下一列會再走一次同一條路**
+                #     => 那個 CSV 從表頭改動的那一刻起**完全停止記錄**,
+                #        只在 log 留一行 `csv write failed`。
+                #
+                # 2026-09-14 加 behind_at_cancel_bps 時撞到,查了才發現它
+                # 一直是這樣:整棵 `logs/` 裡沒有任何一個 `maker.csv.old` /
+                # `trades.csv.old` / `shadow.csv.old` —— **引擎側的輪替在這台
+                # 機器上從來沒有成功過一次**（`minutes.csv.*.old` 是錄製器的,
+                # 走完全不同的程式碼）。
                 with open(path, encoding="utf-8") as fh0:
-                    if fh0.readline().strip() != ",".join(header):
-                        os.replace(path, path + ".old")
+                    stale = fh0.readline().strip() != ",".join(header)
+                if stale:
+                    os.replace(path, path + ".old")
             fresh = not os.path.exists(path)
             with open(path, "a", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
