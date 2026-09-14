@@ -1,4 +1,4 @@
-# arb_watchdog.ps1 — relaunch any member of the §0.75 recording family that
+﻿# arb_watchdog.ps1 — relaunch any member of the §0.75 recording family that
 # is not running. Runs every 5 min from the EntropyArbWatchdog scheduled task.
 #
 # Why (2026-09-03): the whole family died at 21:09 +0800 from one interrupt
@@ -245,3 +245,76 @@ try {
 }
 Add-Content -Path $Log -Value $pullline -Encoding UTF8
 Write-Output $pullline
+
+# ---------------------------------------------------------------------------
+# 名單外的陌生人（2026-09-14）
+#
+# 上面每一段問的都是「**該跑的有沒有在跑**」。這一段問相反的問題：
+# 「**不該跑的有沒有還在跑**」—— 而這個專案的守衛從來沒有人問過後者。
+# freshness 盯的是心跳停了，watchdog 盯的是成員死了；一個「早就該停、
+# 但還活著」的東西在這兩面鏡子裡都是隱形的。
+#
+# 今天一次抓到兩個，而且是同一個形狀：**殺了 python，沒殺那個會把它重拉
+# 的 cmd 包裝層**。
+#   * run_scanner.bat          9/10 07:40 起。掃描器 9/13 搬到 Railway，我改
+#     的是開機啟動檔 —— 那只擋「下次開機不要起」，而這台機器沒重開過，
+#     所以那個 /K 包裝層在 9/13 22:08 又把它拉回來，跑了 21 小時。它一輪
+#     序列打 139 次 Lighter REST，是「每十分鐘斷線一次」的來源。
+#   * run_recorder_OPENAI.bat  同日 08:52 起，一支已經退場的 shadow 引擎。
+#
+# **只報告，絕不動手殺。** 會殺行程的自動化，它的例外分支預設必須是不動手
+# （mistake.md 2026-09-11：看門狗把「我讀不懂旗標」當成「它該死」，殺掉 70
+# 次健康的行程、丟掉六小時不可回填的資料）。這裡連「讀不懂」都談不上 ——
+# 一個陌生人可能是人正在手動跑的東西，而那不是看門狗該替人決定的。
+# ---------------------------------------------------------------------------
+$knownSigs = @($Members.Values | ForEach-Object { ([string]$_[0]).Trim() })
+$knownBats = @($Members.Values | ForEach-Object { ([string]$_[1]).ToLower() })
+$strangers = @()
+
+# (a) 引擎：長得像 main.py --symbol X，但 X 不在註冊表裡。
+foreach ($c in $procs) {
+  if ($c -notlike '*main.py*') { continue }
+  $hit = $false
+  foreach ($s in $knownSigs) { if ($c -like "*$s*") { $hit = $true; break } }
+  if (-not $hit) {
+    $sym = if ($c -match '--symbol\s+(\S+)') { $Matches[1] } else { '?' }
+    $mode = if ($c -like '*--record-only*') { 'record' }
+            elseif ($c -like '*--shadow*')  { 'shadow' }
+            else                            { 'LIVE' }
+    $strangers += "engine --symbol $sym ($mode)"
+  }
+}
+
+# (b) 本機掃描器：9/13 起一律不該在本機跑（Railway 那支才是現役，而本檔
+#     上面的 scan_pull 就是去拉它的產物 —— 兩支同時跑就是重複第二份）。
+foreach ($c in $procs) {
+  if ($c -like '*scanner.py*') { $strangers += 'scanner.py (moved to Railway)' }
+}
+
+# (c) 重拉迴圈本身。**這一項才是真正的元凶** —— 殺 python 完全不會動到它，
+#     所以「行程清單現在是空的」從來不是它停了的證據。
+Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" | ForEach-Object {
+  $cl = [string]$_.CommandLine
+  if ($cl -match 'run_[A-Za-z0-9_]+\.bat') {
+    $b = $Matches[0].ToLower()
+    if ($knownBats -notcontains $b) {
+      $strangers += ("launcher {0} (pid {1}, relaunches every 30s)" -f $b, $_.ProcessId)
+    }
+  }
+}
+
+# 這幾行刻意全是 ASCII。本檔沒有 BOM，PowerShell 5.1 於是用主控台碼頁
+# （cp950）讀它 —— 中文待在**註解**裡無害（就像本檔其他地方），但中文一旦
+# 進到**字串字面值**，全形括號會被解成別的位元組、括號配對斷掉，
+# **整支腳本解析失敗**。2026-09-14 實際發生過一次：這一段第一版把
+# 「已搬 Railway」寫進字串，看門狗當場變成 ParserError。
+# 判斷法很便宜：字串裡有沒有非 ASCII。有就改掉，或替整個檔加 BOM
+# （這裡選前者，因為本檔既有慣例就是「中文只在註解」）。
+$sline = if ($strangers.Count -eq 0) {
+           "$stamp UTC  strangers: none"
+         } else {
+           "$stamp UTC  STRANGERS (not killed, decide by hand): " +
+             (($strangers | Sort-Object -Unique) -join ' | ')
+         }
+Add-Content -Path $Log -Value $sline -Encoding UTF8
+Write-Output $sline
