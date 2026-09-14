@@ -38,6 +38,14 @@ $Members = [ordered]@{
   'HYPE'    = @('--symbol HYPE ', 'run_recorder_HYPE.bat')
   'GOLD_LL' = @('--symbol XAU ',  'run_recorder_GOLD_LL.bat')
   'NVDA_LL' = @('--symbol NVDA ', 'run_recorder_NVDA_LL.bat')
+  # HMM 候選群（2026-09-14，TODO §1.41b）。全部 --shadow：完整策略跑、
+  # 一張單都不送。G2 讀它們各自的 shadow.csv。設定由
+  # arblib/make_hmm_config.py **從量測生成**，不是複製的。
+  # OPENAI 的 CLI 旗標是 **OAI**（HL 側 io:OAI）,不是 OPENAI ——
+  # config.py 對 HL 腿用 CLI 的 symbol,而兩所對同一資產叫不同名字。
+  'OPENAI'  = @('--symbol OAI ',     'run_recorder_OPENAI.bat')
+  'ANSEM'   = @('--symbol ANSEM ',   'run_recorder_ANSEM.bat')
+  'MINIMAX' = @('--symbol MINIMAX ', 'run_recorder_MINIMAX.bat')
   # MET —— HMM 候選的 record-only 錄製器（2026-09-14，TODO §1.41b）。
   # 它要回答 GMX 死掉的那一關：premium 會不會震盪（判準在
   # arblib/hmm_screen.py，跑之前凍結）。**record-only，不送單。**
