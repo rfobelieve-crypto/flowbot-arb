@@ -14,9 +14,33 @@
 
 但五關裡有三關**只需要場館自己的公開資料**：
 
-    G1 淨值   Lighter 半價差 − HL 半價差 − 費用      <- 兩邊的簿口錄製
+    G1 淨值   **兩側較小的那一邊**                    <- 兩邊的簿口錄製
+              賣側 = LT半價差 + 基差 − HL半價差 − 費用
+              買側 = LT半價差 − 基差 − HL半價差 − 費用
     G4 切片   Lighter 逐筆成交的中位金額             <- 成交帶
     G5 雙向   吃單流的少數側                          <- 成交帶的 is_maker_ask
+
+===========================================================================
+G1 從單側改成兩側（2026-09-14），而這也是實盤打出來的
+===========================================================================
+舊版是 `net = lt_hs - hl_hs - fees`，**沒有基差項** —— 它隱含假設兩所的
+中價對齊。實際上 Lighter 與 HL 之間有持續的基差 b，於是真實的兩側相差 2b，
+而舊 G1 算的正好是兩者的**平均**：那兩側都不是。
+
+引擎只會做有利的那一側，庫存就單向堆到上限然後停住：
+
+    XPL   舊G1 +3.99（過關）  賣側 +14.40  買側 **-6.42**  基差 +10.41
+          實盤：報價側別 **332 : 0**、部位 $58.7/$60、十分鐘 95 次
+          `blocked by position caps`
+    AERO  舊G1 +3.14（過關）  賣側 +11.54  買側 **-5.26**  基差  +8.40
+          實盤：122 次報價 2 筆成交
+
+**而 G5 對這個病完全是瞎的**：XPL 的吃單流少數側是 46.0%，流量非常兩側。
+兩者不矛盾 —— G5 量「誰在吃單」，而我們報哪一側是由**基差的正負號**決定的。
+
+連帶的負結果：C6（AERO 在線時間 < 50%）從註冊起就一直紅，因為當初用
+「在線時間」去解釋 AERO 的失敗。現在知道那個解釋是錯的，真正的原因是基差。
+C6 **刻意留著而且留成紅的**，它是「G7 對 AERO 沒有分辨力」的證據。
 
 而我們已經在錄這三樣東西（flow_system 的 lighter/tob、lighter/trades、
 hl/mid），127 個市場、每分鐘。所以這三關可以**一次算完全宇宙**，
@@ -111,12 +135,16 @@ def build(hours: int):
     import pandas as pd
 
     n = max(hours, 1)
-    lt, n1 = _read(["lighter", "tob"], ["coin", "bid", "ask"], n)
-    hl, n2 = _read(["hl", "mid"], ["coin", "spread_bps"], n * 2)
+    # 多取的欄位（2026-09-14）：兩邊的**中價**與時戳。基差要靠它們算，
+    # 而基差是 G1 一直缺的那一項 —— 見下面 df["basis"] 的說明。
+    lt, n1 = _read(["lighter", "tob"],
+                   ["rx_ms", "coin", "bid", "ask"], n)
+    hl, n2 = _read(["hl", "mid"], ["ts", "coin", "spread_bps", "mid"], n * 2)
     tp, n3 = _read(["lighter", "trades"], ["coin", "usd", "is_maker_ask"], n)
 
     lt = lt[(lt.bid > 0) & (lt.ask > lt.bid)].copy()
     lt["hs"] = (lt.ask - lt.bid) / (lt.ask + lt.bid) * 1e4
+    lt["lt_mid"] = (lt.bid + lt.ask) / 2.0
     hl = hl[hl.spread_bps > 0].copy()
 
     g = tp.groupby("coin")
@@ -145,6 +173,47 @@ def build(hours: int):
     # 對沖腿讀不到半價差時**不要猜** —— 那一列標成未量，不進判定。
     df["net"] = df.lt_hs - df.hl_hs - FEES_BPS
 
+    # ---------------------------------------------------------------- 基差
+    # **舊 G1 是單側的,而那是 2026-09-14 XPL 死掉的原因。**
+    #
+    # `net = lt_hs - hl_hs - fees` 隱含假設兩所的中價對齊。實際上 Lighter
+    # 與 HL 之間有持續的基差 b,於是真實的兩側是
+    #
+    #     賣側 = lt_hs + b - hl_hs - fees
+    #     買側 = lt_hs - b - hl_hs - fees
+    #
+    # 舊 G1 算的正好是兩者的**平均**,而那兩側都不是。引擎只會做有利的那一
+    # 側,庫存就單向堆到上限然後停住。XPL 實測:
+    #
+    #     舊 G1 +1.48 bps（過關）   賣側 +12.34   買側 **-9.38**
+    #     實盤報價側別 332 : 0,部位 $58.7/$60,十分鐘 95 次 blocked
+    #
+    # 而 G5（吃單流少數側）那時是 **46.0%** —— 流量非常兩側,所以 G5 對這個
+    # 病完全是瞎的。兩者不矛盾:G5 量「誰在吃單」,而我們報哪一側是由**基差
+    # 的正負號**決定的。
+    #
+    # 對齊用 60 秒桶（HL 是 60 秒取樣,Lighter tob 更密）。不用 merge_asof
+    # 是因為 190 幣各跑一次太慢,而基差取中位對 60 秒內的錯位不敏感。
+    BUCKET_MS = 60_000
+    lt_b = lt[["coin", "rx_ms", "lt_mid"]].copy()
+    lt_b["b"] = (lt_b.rx_ms // BUCKET_MS).astype("int64")
+    lt_b = lt_b.groupby(["coin", "b"], as_index=False)["lt_mid"].median()
+    hl_b = hl[["coin", "ts", "mid"]].copy()
+    hl_b["b"] = (hl_b.ts // BUCKET_MS).astype("int64")
+    hl_b = hl_b.groupby(["coin", "b"], as_index=False)["mid"].median()
+    j = lt_b.merge(hl_b, on=["coin", "b"], how="inner")
+    j = j[(j.lt_mid > 0) & (j["mid"] > 0)]
+    j["bps"] = (j["mid"] - j.lt_mid) / j.lt_mid * 1e4
+    bas = j.groupby("coin")["bps"].median()
+    nb = j.groupby("coin").size()
+    # 樣本太少的不要猜 —— 未量比猜錯好（mistake.md 2026-09-14）。
+    bas = bas[nb >= 30]
+    df["basis"] = [float(bas[c]) if c in bas.index else float("nan")
+                   for c in df.index]
+    df["net_sell"] = df.lt_hs + df.basis - df.hl_hs - FEES_BPS
+    df["net_buy"] = df.lt_hs - df.basis - df.hl_hs - FEES_BPS
+    df["net_min"] = np.minimum(df.net_sell, df.net_buy)
+
     meta = hl_post({"type": "metaAndAssetCtxs"})
     core = {u["name"]: (u, c) for u, c in zip(meta[0]["universe"], meta[1])}
     if len(core) < 100:
@@ -158,9 +227,14 @@ def build(hours: int):
 
 
 def verdict(r):
-    """這支管得到的四關 ＋ 對沖腿存在性。未量一律不算過。"""
+    """這支管得到的四關 ＋ 對沖腿存在性。未量一律不算過。
+
+    **G1 自 2026-09-14 起改判兩側較小的那一邊**（`net_min`）。舊的單側
+    `net` 仍然算出來並印在表上,因為它被引用過,不可以悄悄消失 ——
+    兩欄擺在一起本身就是這個改動的證據。
+    """
     import math
-    g1 = (not math.isnan(r.net)) and r.net > G1_NET_BPS
+    g1 = (not math.isnan(r.net_min)) and r.net_min > G1_NET_BPS
     g4 = r["slice"] >= G4_MIN_SLICE_USD
     g5 = r.taker_min >= G5_TAKER_MINORITY_PCT
     g7 = (not math.isnan(r.uptime)) and r.uptime >= G7_UPTIME_PCT
@@ -178,10 +252,13 @@ def main(argv=None) -> int:
     print("Lighter tob %d 檔 / HL mid %d 檔 / 成交帶 %d 檔"
           " -> %d 個市場（成交 >= %d 筆）\n"
           % (files[0], files[1], files[2], len(df), MIN_TRADES))
-    print("判準：G1 淨 > %.1f bps  G4 切片 >= $%.0f  G5 吃單流少數側 >= %.0f%%"
-          "  **G7 在線時間 >= %.0f%%**  ＋ 對沖腿 HL 量 >= $%.0fk"
+    print("判準：**G1 兩側較小的那一邊** 淨 > %.1f bps  G4 切片 >= $%.0f"
+          "  G5 吃單流少數側 >= %.0f%%  **G7 在線時間 >= %.0f%%**"
+          "  ＋ 對沖腿 HL 量 >= $%.0fk"
           % (G1_NET_BPS, G4_MIN_SLICE_USD, G5_TAKER_MINORITY_PCT,
              G7_UPTIME_PCT, MIN_HL_VOL_USD / 1000))
+    print("  （2026-09-14 起 G1 判 net_min = lt_hs − |基差| − hl_hs − 費用。"
+          "舊的單側值仍印在「舊G1」欄）")
     print()
 
     rows = []
@@ -193,15 +270,33 @@ def main(argv=None) -> int:
     ok.sort(key=lambda x: -x[1].vol)
 
     print("=== 通過的市場：**%d 個**（共 %d 個）===\n" % (len(ok), len(rows)))
-    hdr = ("%-9s %8s %8s %9s %9s %9s %12s %13s"
-           % ("市場", "LT半價差", "淨bps", "**在線%**", "切片$", "吃單少數%",
-              "LT成交$", "HL日成交$"))
+    hdr = ("%-9s %8s %7s %8s %8s %7s %8s %9s %11s"
+           % ("市場", "LT半價差", "基差", "賣側", "買側", "舊G1",
+              "在線%", "切片$", "吃單少數%"))
     print(hdr)
     print("-" * len(hdr))
     for c, r, *_ in ok[:a.top]:
-        print("%-9s %8.2f %8.2f %9.1f %9.2f %9.1f %12.0f %13.0f"
-              % (c, r.lt_hs, r.net, r.uptime, r["slice"], r.taker_min,
-                 r.vol, r.hl_vol))
+        print("%-9s %8.2f %7.2f %8.2f %8.2f %7.2f %8.1f %9.2f %11.1f"
+              % (c, r.lt_hs, r.basis, r.net_sell, r.net_buy, r.net,
+                 r.uptime, r["slice"], r.taker_min))
+    if not ok:
+        print("  （沒有市場通過。這不是錯誤 —— 見下面的自曝檢查）")
+
+    print("\n=== 舊 G1（單側）會放行、而兩側檢驗擋下來的 ===")
+    shown = 0
+    for c, r, *_ in sorted(rows, key=lambda x: -x[1].vol):
+        import math
+        if math.isnan(r.net_min):
+            continue
+        if r.net > G1_NET_BPS and r.net_min <= G1_NET_BPS:
+            print("  %-9s 舊G1 %+6.2f -> 賣 %+7.2f / 買 %+7.2f"
+                  "（基差 %+7.2f）" % (c, r.net, r.net_sell, r.net_buy,
+                                      r.basis))
+            shown += 1
+            if shown >= 12:
+                break
+    if not shown:
+        print("  （沒有 —— 那代表基差這一項在這批資料上沒有分辨力,先查它）")
 
     print("\n=== 自曝檢查（答案已知；紅了先查這支，不是查市場）===")
     d = {c: (r,) for c, r, *_ in rows}
@@ -224,21 +319,65 @@ def main(argv=None) -> int:
         checks.append(("C5 FIL 必須**過不了** G1（實盤一小時 0 成交）",
                        r.net <= G1_NET_BPS, "%.2f bps" % r.net))
     if "AERO" in d:
-        # **C6 是這一關自己的反向證明。** AERO 的中位半價差 10.57 過了 G1,
-        # 於是我們上線 —— 然後一小時 0 成交,因為它塌到 5.31。
-        # 如果 G7 有分辨力,AERO 的在線時間必須明顯低於門檻。
+        # **C6 從 2026-09-14 起是一個已知會紅的檢查,而它紅得有意義。**
+        #
+        # 它原本的用意:AERO 的中位半價差 10.57 過了舊 G1,於是我們上線 ——
+        # 然後一小時幾乎 0 成交。當時我們用「在線時間」去解釋,所以 C6 要求
+        # AERO 的在線時間必須 < 50%。它一直是 52% 左右,也就是
+        # **G7 從來沒有解釋過 AERO**。
+        #
+        # 當天我刻意不去調那個門檻讓它變綠（把儀器擬合到答案正是它要擋的
+        # 事）。現在有了兩側檢驗,才知道真正的原因是**基差**:AERO 的基差
+        # +8.40,賣側 +11.54 而買側 **-5.26** —— 單側市場。見 C9。
+        #
+        # 所以 C6 留著,而且刻意留成紅的:它是「G7 對 AERO 沒有分辨力」這個
+        # 負結果的證據。要拿掉 G7 是另一個決定,不在這個改動裡。
         r = d["AERO"][0]
-        checks.append(("C6 AERO 的在線時間必須 < %.0f%%（中位過關但實盤 0 成交）"
+        checks.append(("C6 AERO 的在線時間必須 < %.0f%%"
+                       "（**已知紅**：G7 從來沒解釋過 AERO，見 C9）"
                        % G7_UPTIME_PCT,
                        (r.uptime == r.uptime) and r.uptime < G7_UPTIME_PCT,
                        "%.1f%%" % r.uptime))
-    allok = True
+        checks.append(("C9 AERO 的買側必須 < 0（兩側檢驗才是 AERO 的解釋）",
+                       (r.net_buy == r.net_buy) and r.net_buy < 0,
+                       "%.2f bps" % r.net_buy))
+    if "XPL" in d:
+        # **C7/C8 是兩側 G1 自己的反向證明。** 2026-09-14 XPL 過了舊 G1
+        # （單側 +1.48）而且過了 G5（吃單流少數側 46.0%,流量非常兩側）,
+        # 於是我們上線 —— 然後報價側別 332:0、部位 $58.7/$60、十分鐘 95 次
+        # blocked by position caps。
+        # 如果兩側檢驗有分辨力,XPL 的買側必須是負的,而且舊 G1 必須是正的
+        # （後者證明**是這個改動擋下它的**,不是它本來就會被別的關擋掉）。
+        r = d["XPL"][0]
+        checks.append(("C7 XPL 的買側必須 < 0（實盤報價側別 332:0）",
+                       (r.net_buy == r.net_buy) and r.net_buy < 0,
+                       "%.2f bps" % r.net_buy))
+        checks.append(("C8 XPL 的**舊** G1 必須 > %.1f（證明是這個改動擋下它）"
+                       % G1_NET_BPS,
+                       r.net > G1_NET_BPS, "%.2f bps" % r.net))
+    # 「已知會紅」與「意外的紅」要分開印。混在一起的話,一個永遠紅的檢查會
+    # 訓練人忽略這整個頻道 —— 那正是 transition-only 告警要避免的事
+    # （mistake.md 2026-09-03：一條永遠紅的守衛跟壞掉的燈一樣沒用）。
+    # **但已知紅不可以被靜音**:它留在表上,只是不觸發「不要解讀上面的表」。
+    KNOWN_RED = {"C6"}
+    surprises = 0
     for name, passed, val in checks:
-        print("  %-52s %-10s %s" % (name, val, "PASS" if passed else "**FAIL**"))
-        allok &= passed
-    print("  -> %s" % ("儀器可信" if allok
-                       else "**先查這支,不要解讀上面的表**"))
-    return 0 if allok else 1
+        tag = name.split()[0]
+        if passed:
+            mark = "PASS"
+        elif tag in KNOWN_RED:
+            mark = "**FAIL（已知）**"
+        else:
+            mark = "**FAIL**"
+            surprises += 1
+        print("  %-58s %-10s %s" % (name, val, mark))
+    if surprises:
+        print("  -> **先查這支,不要解讀上面的表**（%d 個意外的紅）" % surprises)
+    else:
+        print("  -> 儀器可信（%d 個已知的紅,理由寫在原始碼註解裡）"
+              % sum(1 for n, p, _ in checks
+                    if not p and n.split()[0] in KNOWN_RED))
+    return 0 if surprises == 0 else 1
 
 
 if __name__ == "__main__":
