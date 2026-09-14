@@ -163,6 +163,8 @@ class Engine:
         # 每次 _scan_maker 有幾側通過全部關卡 -> {0: n, 1: n, 2: n}。
         # 2 的比例就是「兩側同時掛」能買到多少,見 _scan_maker 結尾的說明。
         self._side_hist: Dict[int, int] = {}
+        # 為什麼那一側掛不出去 -> {reason: n}。見 _scan_maker 的說明。
+        self._plan_reject: Dict[str, int] = {}
         self.maker_posts = 0        # quotes attempted
         self.maker_rested = 0       # quotes confirmed ON the book -> M2 denom
         self.maker_fills = 0        # quotes that got any fill -> M2 numerator
@@ -1013,6 +1015,15 @@ class Engine:
                                             self._eff_threshold(buy_v, sell_v),
                                             cfg.max_order_notional)
             if plan is None:
+                # **為什麼沒掛單**（2026-09-14）。`_side_hist` 說「81% 的掃描
+                # 時刻兩側都不合格」,但沒說為什麼 —— 而下一步完全取決於它:
+                #   no_edge         門檻擋的     -> 降 band 有用
+                #   no_hedge_depth  對沖腿太薄   -> 降 band 沒用
+                #   empty/crossed   資料問題     -> 兩者都沒用
+                # 掛得出去那些單的邊際中位是 5.51 bps（band 3.0）、只有 15%
+                # 低於 4 —— **沒有擠在門檻上**。但那是倖存者:被擋掉的那些
+                # 看不到,所以這個計數是唯一能分辨的東西。
+                self._plan_reject[reason] = self._plan_reject.get(reason, 0) + 1
                 if reason in ("no_edge", "empty_book", "crossed_book",
                               "no_hedge_depth", "would_cross"):
                     self._armed[dkey] = None
@@ -1021,9 +1032,17 @@ class Engine:
             if armed is None:
                 self._armed[dkey] = now
                 self._schedule_poke(cfg.premium_persist_sec)
+                self._plan_reject["arming"] = (
+                    self._plan_reject.get("arming", 0) + 1)
                 continue
             if now - armed < cfg.premium_persist_sec:
                 self._schedule_poke(cfg.premium_persist_sec - (now - armed))
+                # 「這一側好了,但還沒好滿 premium_persist_sec 秒」。
+                # 2026-09-14 第一版漏了這個分支,於是 why-no-quote 全空 ——
+                # 而 `sides` 說 81% 的掃描時刻兩側都不合格。**沒有計數的
+                # 分支在統計上等於不存在**,那正是這個儀器要擋的事。
+                self._plan_reject["persisting"] = (
+                    self._plan_reject.get("persisting", 0) + 1)
                 continue
             ceil_bps = cfg.max_edge_bps
             if ceil_bps > 0 and plan.top_premium_bps > ceil_bps:
@@ -2456,6 +2475,11 @@ class Engine:
                     rec += (" | sides 0/1/2 %d/%d/%d (兩側 %.0f%%)"
                             % (_h.get(0, 0), _h.get(1, 0), _h.get(2, 0),
                                100.0 * _h.get(2, 0) / _tot))
+                _r = self._plan_reject
+                if _r:
+                    top = sorted(_r.items(), key=lambda kv: -kv[1])[:3]
+                    rec += " | why-no-quote " + ",".join(
+                        "%s=%d" % (k, v) for k, v in top)
                 for o in self._maker_open.values():
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
