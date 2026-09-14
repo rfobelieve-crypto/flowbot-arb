@@ -1,8 +1,8 @@
 {
   "ok": false,
-  "reason": "B4 有 live 啟動器不在看門狗的 $Members 裡：run_hmm_FIL.bat, run_hmm_MET.bat, run_recorder_AERO.bat（看門狗不會拉它、本支也數不到它的額度） ｜ B3 hl:core：Σ 該腿 max_position_usd $300.00 超過帳戶天花板 $70.00（GRAM $60, CHIP $60, MNT $60, AERO $60, HMM_GMX $60）—— 每個行程都守得住自己的上限,帳戶層仍然會爆 ｜ B3 lighter:lighter：Σ 該腿 max_position_usd $480.00 超過帳戶天花板 $70.00（GRAM $60, CHIP $60, MNT $60, OPENAI $60, ANSEM $60, MINIMAX $60, AERO $60, HMM_GMX $60）—— 每個行程都守得住自己的上限,帳戶層仍然會爆",
-  "asof": "2026-09-14T10:19:02Z",
-  "ts": 1789381142.9988585,
-  "live": 8,
-  "legs": 17
+  "reason": "B4 有 live 啟動器不在看門狗的 $Members 裡：run_hmm_AERO.bat, run_hmm_FIL.bat, run_hmm_GMX.bat, run_hmm_MET.bat, run_recorder_AERO.bat, run_recorder_ANSEM.bat, run_recorder_CHIP.bat, run_recorder_GRAM.bat, run_recorder_MINIMAX.bat, run_recorder_MNT.bat, run_recorder_OPENAI.bat（看門狗不會拉它、本支也數不到它的額度）",
+  "asof": "2026-09-14T10:24:02Z",
+  "ts": 1789381442.9129453,
+  "live": 0,
+  "legs": 9
 }

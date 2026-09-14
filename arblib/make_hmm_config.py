@@ -268,15 +268,28 @@ BAT = """@echo off
 REM {sym} - HMM candidate, generated from measurements ({date}).
 REM CLI --symbol is the HL leg ({hsym}); the Lighter leg ({sym})
 REM is hedge.symbol in the yaml. config.py ignores entropy.symbol.
-REM MODE: --shadow. Full strategy runs, NOTHING is sent (structure, not
-REM discipline: shadow never calls init_signer, and _blocked is the one
-REM send boundary every order path asks).
-REM G2 in arblib/hmm_screen.py reads this run's shadow.csv.
-REM TO GO LIVE: remove the shadow flag. Needs the user to say so again.
+REM MODE: LIVE. THIS SENDS REAL ORDERS.
+REM
+REM Shadow was retired on 2026-09-14 and the reason is structural, not a
+REM preference: in shadow, `shadow_decisions` and `quotes_cancelled` are
+REM equal line for line and `quotes_rested` is permanently 0, because
+REM maker_rested needs an OPEN status back from the venue. So M2 (fill
+REM rate) has a zero denominator, M3 has no fills to mark out, and M4 has
+REM no real round trip -- the three gates that decide whether this works
+REM are STRUCTURALLY unmeasurable there. A ten-hour clean shadow run told
+REM us nothing about whether live would even start (it would not: the HL
+REM SDK was not installed).
+REM
+REM STOP ORDER MATTERS:
+REM   1. echo flat > logs{bs}{sym}{bs}control.cmd   (while the engine is alive)
+REM   2. comment this member out of ops{bs}arb_watchdog.ps1
+REM   3. only then kill the processes
+REM   4. wait past one watchdog cycle (>5 min) and re-check -- an
+REM      immediately-empty process list is NOT evidence
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines.
 cd /d {eng}
 :loop
-python main.py --shadow --symbol {hsym} --hedge lighter --config config_{sym}.yaml --no-dashboard >> logs{bs}{sym}{bs}runner.log 2>&1
+python main.py --symbol {hsym} --hedge lighter --config config_{sym}.yaml --no-dashboard >> logs{bs}{sym}{bs}runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
 """

@@ -27,8 +27,8 @@ HMM 是做市不是套利 —— 它靠**兩側輪流成交**把庫存做掉。p
 
     G1 淨值   **淨邊際 > 3.0 bps**（2026-09-14 改，見下）
                  淨 = 掛單腿半價差 - 對沖腿半價差 - 費用(0.40+4.50)
-    G2 兩側   少數側可做的分鐘佔比 >= 20%
-              「可做」= 引擎自己的 shadow.csv 決策側別
+    G2 兩側   少數側的報價佔比 >= 20%
+              來源 = live 的 maker.csv（2026-09-14 前是 shadow.csv）
     G3 流量   掛單腿有成交的分鐘佔比 >= 30%
     G4 切片   **中位成交切片 >= 對沖腿最小單（$10）**（2026-09-14 新增）
     G5 雙向   **吃單流少數側 >= 35%**（2026-09-14 新增）
@@ -211,15 +211,30 @@ def screen(pair):
     # **而繼續調到控制組變綠，就是把儀器擬合到我期待的答案**
     # —— 那正是 C3 存在要擋的事（mistake.md 2026-08-26 / 2026-09-09）。
     #
-    # 所以 G2 的唯一來源是 `logs/<pair>/shadow.csv`：引擎跑 --shadow 時
-    # 每一次報價決策的側別。它不可能跟引擎不一致,因為它就是引擎寫的。
-    # 代價是 G2 需要**先跑一輪 shadow**（GMX 70 分鐘給了 4,788 次決策,
-    # 一小時綽綽有餘）。沒跑過就是 None,而 None 不是 0 也不是 PASS。
-    sp = os.path.join(LOGS, pair, "shadow.csv")
+    # **2026-09-14：來源從 shadow.csv 換成 live 的 maker.csv。**
+    # shadow 退場了,理由是雙重的而且都是量出來的：
+    #   (a) 結構上量不到它該量的東西 —— shadow 的 quotes_rested 恆為 0
+    #       （maker_rested 要交易所回一個 OPEN 狀態）,所以 M2 的分母永遠是零、
+    #       M3 沒有成交可記、M4 沒有真實往返。跑十小時的乾淨 shadow 對
+    #       「live 起不起得來」零資訊量（而那天 live 起不來：HL 的 SDK 沒裝）。
+    #   (b) **它同時是 WAF 預算的主要消耗者** —— `_http_keepalive_loop` 只在
+    #       `not record_only` 時起,所以 shadow 每 10 秒打兩腿而 record-only
+    #       不打。七支 shadow = 84 req/分,結果是每十分鐘八支引擎一起被擋 60 秒,
+    #       而被擋的是**重連**,那時會下單的那支手上有部位。
+    #
+    # 問題沒變（「這個市場讓不讓引擎兩側都報價」）,只是換成 live 的紀錄回答。
+    # maker.csv 每一張真的送出去的報價都有 side,所以它跟 shadow.csv 一樣
+    # 「不可能跟引擎不一致」,而且量的是真的發生過的事。
+    # **代價**：G2 要先跑一輪 live。沒跑過就是 None —— 而 None 不是 0 也不是 PASS。
+    #
+    # 順帶記一個實盤打出來的校準：MET 的 shadow 決策側別是 18.8% 少數側,
+    # 而 **live 的 121 筆成交全部是 SELL**。所以連 shadow 的決策側別都比
+    # 真相樂觀 —— 真正對得上的是吃單流（G5,MET 6.9%）。
+    sp = os.path.join(LOGS, pair, "maker.csv")
     sell_ok = buy_ok = None
     if os.path.exists(sp):
         sd = [x for x in csv.DictReader(io.open(sp, encoding="utf-8"))
-              if x.get("action") == "quote"]
+              if x.get("side") in ("SELL", "BUY")]
         if len(sd) >= 100:
             sell_ok = sum(1 for x in sd if x.get("side") == "SELL")
             buy_ok = sum(1 for x in sd if x.get("side") == "BUY")
