@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+"""只從**一種** HALT 自動恢復，而且判準是「狀態已經好了」不是「原因是什麼」。
+
+2026-09-15，使用者選了「只自動重啟那一類，其他照舊要人」。
+
+===========================================================================
+為什麼需要它
+===========================================================================
+2026-09-15 06:10 MON 成交的那一瞬間，HL 對沖被限流擋掉（HTTP 429）：
+
+    06:10:48.812  [QUOTE FILL] LIGHTER BUY 639
+    06:10:48.863  [QUOTE HEDGE] HL SELL 0/639 send-failed — RATE_LIMITED 429
+    06:10:48.956  CRITICAL HALTED: net imbalance +638.2 exceeds max_net_base
+    06:11:04.989  [HEDGE] net +638.2 — SELL 638 on LIGHTER  <- 自己平掉了
+    06:11:05.231  部位回到 net +0.2
+
+**風控全部做對了**：144 毫秒內 HALT、16 秒內把對不到沖的部位就地平掉。
+而 HALT 是單向的（設計如此：要人看一眼再重啟），所以它就停在那裡 ——
+**1 小時 46 分，佔那個累積窗口的 23%**，而我七小時後才看到。
+
+===========================================================================
+允許清單：**一條**，而且它是狀態不是原因
+===========================================================================
+`engine._risk_halt` 有七類 HALT。只有這一類可以自動恢復：
+
+    net imbalance ... exceeds max_net_base     ∧   現在 |net| <= net_tolerance_base
+
+第二個條件才是重點：**它說「當初讓它 HALT 的那件事已經不成立了」**。
+引擎會試 `halt_flatten_attempts` 次 reduce-only 把它平掉；平成功了，重啟
+（會 strict=True 重讀真實部位）就是安全的。**沒平成功就不要碰** ——
+那時重啟等於讓一個部位對不上的引擎重新開始交易。
+
+比對「原因是不是 429」是**錯的判準**：429 只是起因，而下一次可能是別的
+起因造成同一個狀態，也可能 429 造成一個完全不同、不該自動恢復的狀態。
+
+**明文不可自動恢復**（列出來，因為清單的形狀決定它看得見什麼）：
+
+    session PnL below floor  -> 那是每日虧損 kill switch。自動重啟它
+                                = 把 kill switch 拆掉，這條絕不放寬
+    gross exposure / 帳戶上限 -> 曝險本身太大，不是暫時的
+    N consecutive errors      -> 引擎在壞，不是市場在壞
+    maker 迴圈崩潰            -> 可能有一張我們不知道的單在簿上
+    簿口過期 / 波動熔斷        -> 要人判斷市場狀況
+
+===========================================================================
+邊界
+===========================================================================
+這支住在 arb，因為**重啟的權限屬於 arb**（CLAUDE.md §第 4 線的隔離：
+flow_system 讀它，它不讀 flow_system）。它不送 Discord —— 它寫一份
+`logs/<pair>/halt_recover.json`，由 flow_system 的 `hmm_watch.py` 讀去報。
+寫的人在 arb、讀的人在 flow_system，方向沒有反。
+
+用法（由 arb_watchdog.ps1 每 5 分鐘呼叫）：
+    python tools/halt_recover.py --pair MON
+    python tools/halt_recover.py --pair MON --dry     # 只說會做什麼
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ENGINE = os.path.dirname(HERE)
+
+# **允許清單。加東西進來要寫理由，而且要先有一次真實事故。**
+RECOVERABLE = re.compile(r"net imbalance .* exceeds max_net_base")
+
+BUDGET_N = 2                  # 這麼多次
+BUDGET_WINDOW_SEC = 6 * 3600  # 在這麼久之內
+STATUS_MAX_AGE_SEC = 300      # status.json 比這舊 = 行程死了,那是看門狗的事
+
+
+def _cfg_tolerance(pair: str) -> float:
+    """net_tolerance_base 從設定讀，不寫死 —— 寫死就是第二份實作。"""
+    import yaml
+    for nm in ("config_%s.yaml" % pair, "config_HMM_%s.yaml" % pair):
+        p = os.path.join(ENGINE, nm)
+        if os.path.exists(p):
+            y = yaml.safe_load(io.open(p, encoding="utf-8")) or {}
+            v = (y.get("execution") or {}).get("net_tolerance_base")
+            if v is not None:
+                return float(v)
+    raise RuntimeError("讀不到 %s 的 net_tolerance_base —— 不猜，不動它" % pair)
+
+
+def _state_path(pair: str) -> str:
+    return os.path.join(ENGINE, "logs", pair, "halt_recover.json")
+
+
+def _load_state(pair: str) -> dict:
+    p = _state_path(pair)
+    if not os.path.exists(p):
+        return {"restarts": []}
+    try:
+        return json.load(io.open(p, encoding="utf-8"))
+    except Exception:
+        return {"restarts": []}
+
+
+def _save(pair: str, st: dict) -> None:
+    io.open(_state_path(pair), "w", encoding="utf-8").write(
+        json.dumps(st, ensure_ascii=False, indent=1))
+
+
+def _pids(pair: str) -> list:
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "@(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+         "Where-Object { $_.CommandLine -like '*--symbol %s *' }).ProcessId"
+         % pair],
+        capture_output=True, text=True, timeout=60)
+    return [int(x) for x in out.stdout.split() if x.strip().isdigit()]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pair", required=True)
+    ap.add_argument("--dry", action="store_true")
+    a = ap.parse_args()
+    pair = a.pair
+    now = time.time()
+
+    sj = os.path.join(ENGINE, "logs", pair, "status.json")
+    if not os.path.exists(sj):
+        print("沒有 status.json —— 沒跑過")
+        return 0
+    age = now - os.path.getmtime(sj)
+    if age > STATUS_MAX_AGE_SEC:
+        print("status.json %.0f 分鐘沒動 —— 行程可能死了，那是看門狗的事"
+              % (age / 60))
+        return 0
+    st = json.load(io.open(sj, encoding="utf-8"))
+    if st.get("ok", True):
+        return 0                                   # 沒事，安靜
+
+    reason = str(st.get("reason", ""))
+    if "HALT" not in reason.upper():
+        print("ok=False 但不是 HALT：%s" % reason[:120])
+        return 0
+
+    # ---- 關卡 1：這一類 HALT 允許自動恢復嗎 ----------------------------
+    if not RECOVERABLE.search(reason):
+        print("**這一類 HALT 不自動恢復**（要人看一眼）：%s" % reason[:140])
+        return 0
+
+    # ---- 關卡 2：當初讓它 HALT 的那件事，現在還成立嗎 ------------------
+    # 這一關才是真正的判準。平倉沒成功就不要碰。
+    tol = _cfg_tolerance(pair)
+    net = abs(float((st.get("private") or {}).get("net_base") or 0.0))
+    if net > tol:
+        print("**裸曝險還在**（|net| %.4g > 容忍 %.4g）—— 平倉沒成功，不重啟"
+              % (net, tol))
+        return 0
+
+    # ---- 關卡 3：預算。持續出問題就不要一直拉它起來 --------------------
+    state = _load_state(pair)
+    recent = [t for t in state.get("restarts", [])
+              if now - t < BUDGET_WINDOW_SEC]
+    if len(recent) >= BUDGET_N:
+        print("**預算用完**（%d 小時內已自動重啟 %d 次）—— 這不是暫時性問題，"
+              "要人看" % (BUDGET_WINDOW_SEC // 3600, len(recent)))
+        state["restarts"] = recent
+        state["blocked_at"] = now
+        state["blocked_reason"] = reason[:200]
+        _save(pair, state)
+        return 0
+
+    pids = _pids(pair)
+    if not pids:
+        print("找不到行程 —— 看門狗會處理")
+        return 0
+
+    msg = ("HALT 自動恢復：%s｜裸曝險 %.4g <= 容忍 %.4g｜本窗第 %d/%d 次"
+           % (reason[:90], net, tol, len(recent) + 1, BUDGET_N))
+    if a.dry:
+        print("[乾跑] 會殺 pid %s 讓 .bat 迴圈拉回來" % pids)
+        print("[乾跑] " + msg)
+        return 0
+
+    for pid in pids:
+        subprocess.run(["powershell", "-NoProfile", "-Command",
+                        "Stop-Process -Id %d -Force" % pid], timeout=60)
+    recent.append(now)
+    state["restarts"] = recent
+    state["last"] = {"ts": now, "reason": reason[:200], "net": net,
+                     "tol": tol, "pids": pids, "msg": msg}
+    _save(pair, state)
+    # **不在這裡送 Discord** —— 告警管線住在 flow_system，而 arb 不讀它。
+    # hmm_watch.py 讀這份 json 去報（寫在 arb、讀在 flow_system，方向沒反）。
+    print(msg)
+    print("已殺 pid %s —— .bat 的 :loop 會在 30 秒內拉回來（strict 重讀部位）"
+          % pids)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    raise SystemExit(main())

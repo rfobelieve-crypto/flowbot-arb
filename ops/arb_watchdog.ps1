@@ -262,6 +262,40 @@ try {
 Add-Content -Path $Log -Value $budline -Encoding UTF8
 Write-Output $budline
 
+# HALT 自動恢復（2026-09-15，使用者選的「只做 C」）。
+#
+# **只有一種 HALT 會被自動恢復**：net imbalance 超過 max_net_base，而且
+# 裸曝險**現在已經平回容忍內**（= 引擎的 reduce-only 平倉成功了）。
+# 其他六類（每日虧損 kill switch、曝險上限、連續錯誤、maker 迴圈崩潰、
+# 簿口過期、波動熔斷）一律要人 —— 判準與理由寫在 halt_recover.py 檔頭，
+# 每一道關卡都有一個「證明它擋得住」的測試（tests/test_halt_recover.py）。
+#
+# 為什麼放這裡而不是 flow_system 的看護：**重啟的權限屬於 arb**
+# （CLAUDE.md §第 4 線的隔離是單向的）。它不送 Discord，只寫
+# logs/<pair>/halt_recover.json，由 hmm_watch.py 讀去報。
+#
+# 只對 run_hmm_* 且沒有 STOP 旗標的跑 —— record-only 不會 HALT。
+foreach ($m in $Members.GetEnumerator()) {
+  $bat = $m.Value[1]
+  if (-not $bat.StartsWith('run_hmm_')) { continue }
+  $stopFile = Join-Path $Root ('logs\stop\' +
+              [IO.Path]::GetFileNameWithoutExtension($bat) + '.stop')
+  if (Test-Path $stopFile) { continue }
+  try {
+    $hr = & python (Join-Path $Eng 'tools\halt_recover.py') --pair $m.Key 2>&1
+    $hrTxt = ($hr | Where-Object { "$_".Trim() }) -join ' | '
+    if ($hrTxt) {
+      $line = "$stamp UTC  halt_recover[$($m.Key)]: $hrTxt"
+      Add-Content -Path $Log -Value $line -Encoding UTF8
+      Write-Output $line
+    }
+  } catch {
+    $line = "$stamp UTC  halt_recover[$($m.Key)] FAILED: $($_.Exception.Message)"
+    Add-Content -Path $Log -Value $line -Encoding UTF8
+    Write-Output $line
+  }
+}
+
 # 掃描器的產物拉回本機（2026-09-13，docs/DEPLOY.md §6）。
 #
 # 為什麼掛在這裡而不是另開一個排程：這台機器上「每 5 分鐘、隱藏視窗」的心跳
