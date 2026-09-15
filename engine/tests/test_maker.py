@@ -132,6 +132,7 @@ def make_cfg(**over):
         "midline_bps": 0.0, "upper_bps": 2.0, "lower_bps": 2.0,
         "mode": "maker", "maker_timeout_sec": 0.15, "cancel_timeout_sec": 0.1,
         "maker_poll_sec": 0.01, "max_net_base": 0.003,
+        "net_grace_sec": 0.0, "max_daily_loss_usd": 0.0,
         "maker_reprice_bps": 0.0, "staleness_sec": 5.0,
         "vol_window_sec": 30.0, "vol_max_move_bps": 0.0,
         "vol_cooldown_sec": 60.0,
@@ -174,6 +175,8 @@ logging:
   maker_csv: {body['logdir']}/maker.csv
 risk:
   max_net_base: {body['max_net_base']}
+  net_grace_sec: {body['net_grace_sec']}
+  max_daily_loss_usd: {body['max_daily_loss_usd']}
   vol_window_sec: {body['vol_window_sec']}
   vol_max_move_bps: {body['vol_max_move_bps']}
   vol_cooldown_sec: {body['vol_cooldown_sec']}

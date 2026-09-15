@@ -105,6 +105,10 @@ class Engine:
         self._venue_locks: Dict[str, asyncio.Lock] = {}
         self._exec_tasks: set = set()
         self.halted = False
+        # |net| 是**從什麼時候開始**超過 max_net_base 的。None = 現在沒超過。
+        # 「現在失衡」與「失衡一直好不了」是兩件事，只有後者代表對沖失敗 ——
+        # 而純水位的閘門分不出來，那讓掛單對沖結構上不可能（2026-09-15）。
+        self._net_over_since = None
         # B5: operator pause is NOT a halt. It stops opening; it never stops
         # hedging, flattening, self-rescue or reconcile, and it is reversible
         # from the control channel. `halted` is not.
@@ -2153,10 +2157,42 @@ class Engine:
         # real positions with strict=True.
         cap = self.cfg.max_net_base
         if cap > 0 and abs(net) > cap:
-            self._risk_halt(f"net imbalance {net:+.6g} exceeds max_net_base "
-                            f"{cap:.6g} — the legs are no longer hedging "
-                            f"each other")
-            return
+            # **時間維度（2026-09-15）。** 這道閘門原本是純水位:一超過就 HALT。
+            # 那對「立刻吃單對沖」是對的 —— 對沖是同步的,超過水位就代表失敗。
+            #
+            # 但它讓**掛單對沖結構上不可能**:掛單依定義要等成交,而一張單
+            # (639 顆)本來就大於這個上限(491.873),所以成交那一刻必然 HALT。
+            # 而掛單對沖是唯一能把每筆從 −1.47 翻到 +2.18 bps 的槓桿
+            # (HL 吃單 4.50 -> 掛單 1.50,而且不用再穿 0.65 的價差)。
+            #
+            # **不可以改成調大 max_net_base** —— 那會拆掉這道守衛本身
+            # (CLAUDE.md 2026-09-14:「必須 < 1 張單,否則對沖全滅不會跳」),
+            # 而那正是我自己寫的稽核搞反方向、差點放行 GMX 的同一件事。
+            #
+            # 正確的修法是加**時間**:「現在失衡」與「失衡一直好不了」是
+            # 兩件事,只有後者代表對沖失敗。上面那段註解寫的失效模式
+            # ——「對沖一直失敗而失衡一直長大」——**完全保留**,只是晚
+            # net_grace_sec 秒開火。
+            #
+            # **預設 0.0 = 跟今天逐位元組相同**（第一次超過就 HALT）。
+            # `now` 在這個函式裡沒有定義 —— 第一版直接用了它,而 py_compile
+            # 會過（NameError 是 runtime 不是語法),它會在**第一次超過水位**
+            # 那一刻炸,也就是最不能炸的時刻（mistake.md 2026-04-22）。
+            now_ = time.time()
+            if self._net_over_since is None:
+                self._net_over_since = now_
+            over_for = now_ - self._net_over_since
+            if over_for >= self.cfg.net_grace_sec:
+                self._risk_halt(
+                    f"net imbalance {net:+.6g} exceeds max_net_base "
+                    f"{cap:.6g} for {over_for:.1f}s (grace "
+                    f"{self.cfg.net_grace_sec:.1f}s) — the legs are no "
+                    f"longer hedging each other")
+                return
+        elif self._net_over_since is not None:
+            # 回到水位內 -> **時鐘歸零**。不歸零的話,幾小時前一次短暫失衡
+            # 會讓下一次瞬間 HALT —— 那等於把寬限期偷偷變成 0。
+            self._net_over_since = None
         # B4 daily loss floor: session mark-to-market against the baseline
         # taken at first evaluation. O(1) over two venues, no I/O.
         gross_cap = self.cfg.max_gross_usd

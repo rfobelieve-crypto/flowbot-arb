@@ -204,6 +204,7 @@ class Config:
     # Declared without a default so it cannot be forgotten at a call site;
     # load_config always supplies it (default 3x net_tolerance_base).
     max_net_base: float
+    net_grace_sec: float
     # B4 (2026-09-04): the session mark-to-market floor. The engine halts
     # when session PnL drops below -this. Constant cost: session_pnl() is a
     # sum over two venues, no I/O. 0 = disabled (not recommended once live).
@@ -363,6 +364,7 @@ _SCHEMA: Dict[str, Any] = {
     },
     "risk": {
         "max_net_base": float,      # B4/G1: hard cap on |leg A + leg B|
+        "net_grace_sec": float,     # 失衡**持續**多久才算對沖失敗
         "max_daily_loss_usd": float,  # B4: session MTM floor, halts on breach
         "max_gross_usd": float,       # B4: absolute sum |pos x mid| ceiling
         "max_account_gross_usd": float,  # B6: the same, for the whole ACCOUNT
@@ -513,6 +515,9 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
                                                "net_tolerance_base", 0.001))))
     if max_net_base < 0:
         raise ConfigError("risk.max_net_base must be >= 0 (0 disables)")
+    net_grace_sec = float(_get(raw, "risk", "net_grace_sec", 0.0))
+    if net_grace_sec < 0:
+        raise ConfigError("risk.net_grace_sec must be >= 0 (0 = 今天的行為)")
     max_daily_loss_usd = float(_get(raw, "risk", "max_daily_loss_usd", 0.0))
     if max_daily_loss_usd < 0:
         raise ConfigError("risk.max_daily_loss_usd must be >= 0 (0 disables)")
@@ -707,6 +712,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
 
     return Config(
         max_net_base=max_net_base,
+        net_grace_sec=net_grace_sec,
         max_daily_loss_usd=max_daily_loss_usd,
         max_gross_usd=max_gross_usd,
         max_account_gross_usd=max_account_gross_usd,
