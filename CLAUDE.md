@@ -121,6 +121,8 @@
 | HMM 分析工具 | `engine/tools/fill_decomp.py`、`markout_curve.py`、`account_budget.py`、`funding_status.py` |
 | **HMM 看護（Discord）** | `ops/hmm_watch.py` ＋ `ops/live_hmm.py` ＋ `ops/alert.py`；排程 `Arb_HmmWatch`（`ops/register_hmm_watch.ps1`），產物 `results/hmm_watch.log`、`results/hmm_alert_last.json`。憑證 `ARB_DISCORD_WEBHOOK_URL` 放 `arb/.env` |
 | 停一個標的 | 建 `engine/logs/stop/<啟動器檔名>.stop`（.bat 迴圈、看門狗、看護三個讀者都認它） |
+| **常駐 WS 錄製器**（HL 成交帶／中價、Lighter 成交帶／中價＋頂檔） | `recorders/{hl_tape,hl_mid,lighter_tape,lighter_mid}.py`，2026-09-15 從 flow_system 搬入。資料寫 `D:/flowbot_data/{hl,lighter}/...`（HMM 工具讀這裡），旗標 `results/*_last.json`，log `recorders/logs/` |
+| 錄製器看門狗 | `ops/recorder_watchdog.ps1`，排程 `Arb_RecorderWatchdog` 每 5 分鐘：旗標過期或 ok=false 就殺掉重啟，**60 分鐘內最多 3 次**（每次重啟都是同 IP 的一次 WS 重連）。停一支：建 `recorders/stop/<name>.stop`。**不要**把它們併進 `arb_watchdog.ps1`（那支只看行程、從不殺，判準相反） |
 
 ## 7. 現在還開著的（2026-09-04 晚）
 

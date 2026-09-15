@@ -29,3 +29,13 @@ engine/logs/universe/
 # HMM watcher runtime state (rewritten every 5 min by Arb_HmmWatch)
 results/hmm_watch_last.json
 results/hmm_alert_last.json
+
+# recorders/ runtime state (2026-09-15): locks, flags rewritten every 5 min, restart counters, stop flags, tape address universe
+results/.*.lock
+results/hl_tape_last.json
+results/hl_mid_last.json
+results/lighter_tape_last.json
+results/lighter_mid_last.json
+recorders/logs/
+recorders/data/
+recorders/stop/
