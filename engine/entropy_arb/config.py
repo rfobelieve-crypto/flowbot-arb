@@ -205,6 +205,7 @@ class Config:
     # load_config always supplies it (default 3x net_tolerance_base).
     max_net_base: float
     net_grace_sec: float
+    hedge_maker_timeout_sec: float
     # B4 (2026-09-04): the session mark-to-market floor. The engine halts
     # when session PnL drops below -this. Constant cost: session_pnl() is a
     # sum over two venues, no I/O. 0 = disabled (not recommended once live).
@@ -387,6 +388,7 @@ _SCHEMA: Dict[str, Any] = {
         # 2026-09-14：離 maker 場館觸價超過這麼多 bps 就撤單重掛。
         # 0.0 = 關閉（預設）。理由見 engine._maker_cancel_reason。
         "maker_reprice_bps": float,
+        "hedge_maker_timeout_sec": float,  # 對沖先掛單試多久,0=直接吃單
         "maker_min_edge_bps": float,  # B3: cancel a quote whose edge decayed
         "premium_persist_sec": float,
         "cooldown_sec": float,
@@ -516,6 +518,12 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     if max_net_base < 0:
         raise ConfigError("risk.max_net_base must be >= 0 (0 disables)")
     net_grace_sec = float(_get(raw, "risk", "net_grace_sec", 0.0))
+    hedge_maker_timeout_sec = float(
+        _get(raw, "execution", "hedge_maker_timeout_sec", 0.0))
+    if hedge_maker_timeout_sec < 0:
+        raise ConfigError(
+            "execution.hedge_maker_timeout_sec must be >= 0 "
+            "(0 = 直接吃單,今天的行為)")
     if net_grace_sec < 0:
         raise ConfigError("risk.net_grace_sec must be >= 0 (0 = 今天的行為)")
     max_daily_loss_usd = float(_get(raw, "risk", "max_daily_loss_usd", 0.0))
@@ -713,6 +721,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
     return Config(
         max_net_base=max_net_base,
         net_grace_sec=net_grace_sec,
+        hedge_maker_timeout_sec=hedge_maker_timeout_sec,
         max_daily_loss_usd=max_daily_loss_usd,
         max_gross_usd=max_gross_usd,
         max_account_gross_usd=max_account_gross_usd,

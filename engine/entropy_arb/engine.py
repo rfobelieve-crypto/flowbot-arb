@@ -1507,6 +1507,92 @@ class Engine:
         order.mark_hedged(pend)   # attempted exactly once, whatever happens
         await self._hedge_maker_fill(maker_v, taker_v, order, pend)
 
+    async def _hedge_try_maker(self, taker_v, is_buy: bool, qty: float,
+                               order: MakerOrder) -> float:
+        """對沖先掛 post-only 試一次。回傳**成交了多少**（0 = 完全沒成交）。
+
+        **只試一次、不重試、不等撤單確認。** 沒成交的殘餘交給呼叫端的吃單
+        路徑，那條是冪等的（只吃殘餘），所以這支的失敗是安全的失敗。
+
+        為什麼不撤單再吃單：撤單確認在這個場館今天死鎖過兩次（74 分 + 81 分）。
+        在報價腿上那只是空轉；在**對沖腿**上那是**裸著卡住**。所以這支寧可
+        把一張可能還活著的掛單留在簿上，也不要等一個可能永遠不來的確認 ——
+        而留下來的那張，最壞情況是稍後成交造成過度對沖，
+        再由淨額對沖路徑收掉（那條本來就是「兩腿不一致」的擁有者）。
+        """
+        # post-only 要掛在**自己這一側的觸價**上：買掛 bid、賣掛 ask。
+        # 掛進對手價會被交易所以 ALO 拒絕（那正是 post-only 的定義）。
+        ref = taker_v.book.best_bid() if is_buy else taker_v.book.best_ask()
+        if not ref:
+            return 0.0
+        px = (taker_v.px_round(ref, False) if is_buy
+              else taker_v.px_round(ref, True))
+        t0 = time.time()
+        try:
+            async with self._vlock(taker_v.key):
+                self._record_send(taker_v)
+                res = await taker_v.send_maker(is_buy=is_buy, qty=qty,
+                                               limit_px=px)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:                                  # noqa: BLE001
+            log.warning("[HEDGE MAKER] send failed: %r — 交給吃單", e)
+            return 0.0
+
+        filled = float(res.get("filled_base") or 0.0)
+        handle = res.get("handle")
+        # 交易所有回報均價就用它，沒有才用我們掛的價 —— 跟 `MakerOrder.fill_px`
+        # 同一條規則：掛單是對手穿過來成交的，所以限價是精確值不是估計值，
+        # 但只要交易所講了話就以它為準。兩者不一致而我們記自己那個，
+        # 省下來的費就只存在於帳面上。
+        avg = res.get("avg_px")
+        if res.get("err") or handle is None:
+            log.info("[HEDGE MAKER] 掛不上（%s）— 交給吃單",
+                     str(res.get("err"))[:80])
+            return self._book_hedge_fill(taker_v, is_buy, filled, avg or px)
+
+        deadline = t0 + self.cfg.hedge_maker_timeout_sec
+        while time.time() < deadline and filled < qty:
+            await asyncio.sleep(min(self.cfg.maker_poll_sec, 0.25))
+            try:
+                st = await taker_v.poll_order(handle)
+            except Exception:                                   # noqa: BLE001
+                break
+            got = st.get("filled_base")
+            if got is not None:
+                filled = max(filled, float(got))
+            avg = st.get("avg_px") or avg
+            if st.get("terminal"):
+                break
+        if filled < qty:
+            # 撤單送出去就好，**不等確認**（理由在 docstring）。
+            try:
+                await taker_v.cancel_order(handle)
+            except Exception:                                   # noqa: BLE001
+                pass
+        log.info("[HEDGE MAKER] %s %.6g/%.6g @%.8g in %.2fs — %s",
+                 "BUY" if is_buy else "SELL", filled, qty, px,
+                 time.time() - t0,
+                 "省下吃單費" if filled >= qty else "殘餘交給吃單")
+        order.stats["hedge_maker_ms"] = (time.time() - t0) * 1e3
+        return self._book_hedge_fill(taker_v, is_buy, filled, avg or px)
+
+    def _book_hedge_fill(self, taker_v, is_buy: bool, filled: float,
+                         px: float) -> float:
+        """把掛單對沖成交的部分記進部位與現金。用**掛單**費率，不是吃單。"""
+        if filled <= 0:
+            return 0.0
+        fee = taker_v.maker_fee_bps / 1e4
+        if is_buy:
+            taker_v.position += filled
+            taker_v.cash -= filled * px * (1.0 + fee)
+        else:
+            taker_v.position -= filled
+            taker_v.cash += filled * px * (1.0 - fee)
+        taker_v.volume_usd += filled * px
+        taker_v.last_traded_ts = time.time()
+        return filled
+
     async def _hedge_maker_fill(self, maker_v, taker_v, order: MakerOrder,
                                 qty: float) -> None:
         """Take the other leg for a fill we just received. Never retries:
@@ -1526,6 +1612,30 @@ class Engine:
         if self._blocked("quote-hedge", taker_v, side="BUY" if is_buy else "SELL",
                          qty=qty, px=limit):
             return
+
+        # ---------------------------------------------- 先用掛單試一次對沖
+        # **為什麼**（2026-09-15，逐筆分解 n=30 量出來的）:
+        #     掛單腿毛利 +4.08 bps   對沖成本 −5.55   ->   淨 **−1.47**
+        # 而對沖成本裡 HL 吃單費就佔 4.50。改成掛單是 1.50，而且掛單**不穿
+        # 價差**，連 0.65 的半價差也省掉 -> 4.08 − 0.40 − 1.50 = **+2.18**。
+        # 這是唯一能單獨把符號翻正的槓桿：費率階梯今天查過帳戶（`userFees`），
+        # VIP 第一階要 $5,000,000、做市商負費率要日均 $28,202,011，
+        # 而我們累計 **$695** —— 兩條都搆不到。
+        #
+        # HL 那側撐得住：MON 在 HL 是 1019 筆/小時，我們要的那一側每 7 秒
+        # 一筆，而我們一張 $15 只有中位切片 $100 的 0.2 倍。
+        #
+        # **逾時之後不「撤單再吃單」。** 撤單確認今天死鎖過兩次（74 分 + 81
+        # 分），而死鎖發生在**對沖**這條路上代表**裸著卡住**，比空轉嚴重得多。
+        # 改成：掛單只試一次，沒成交就把**殘餘**交給下面既有的吃單路徑。
+        # 那條路是冪等的（只吃殘餘），所以就算撤單沒確認、掛單稍後才成交，
+        # 淨額對沖路徑照樣收得乾淨。
+        #
+        # **預設 0.0 = 不試、直接吃單 = 今天的行為。**
+        if cfg.hedge_maker_timeout_sec > 0:
+            qty -= await self._hedge_try_maker(taker_v, is_buy, qty, order)
+            if qty <= max(taker_v.min_base, 0.0):
+                return
         t0 = time.time()
         try:
             async with self._vlock(taker_v.key):

@@ -133,6 +133,7 @@ def make_cfg(**over):
         "mode": "maker", "maker_timeout_sec": 0.15, "cancel_timeout_sec": 0.1,
         "maker_poll_sec": 0.01, "max_net_base": 0.003,
         "net_grace_sec": 0.0, "max_daily_loss_usd": 0.0,
+        "hedge_maker_timeout_sec": 0.0,
         "maker_reprice_bps": 0.0, "staleness_sec": 5.0,
         "vol_window_sec": 30.0, "vol_max_move_bps": 0.0,
         "vol_cooldown_sec": 60.0,
@@ -152,7 +153,7 @@ def make_cfg(**over):
     # recorders live there and a test run must not leave rows in them
     body["logdir"] = tempfile.mkdtemp(prefix="arb-test-").replace("\\", "/")
     f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
-    f.write(f"""
+    yaml_text = f"""
 thresholds:
   midline_bps: {body['midline_bps']}
   upper_bps: {body['upper_bps']}
@@ -164,6 +165,7 @@ execution:
   cancel_timeout_sec: {body['cancel_timeout_sec']}
   maker_poll_sec: {body['maker_poll_sec']}
   maker_reprice_bps: {body['maker_reprice_bps']}
+  hedge_maker_timeout_sec: {body['hedge_maker_timeout_sec']}
   staleness_sec: {body['staleness_sec']}
   premium_persist_sec: 0.0
   net_tolerance_base: 0.001
@@ -180,7 +182,14 @@ risk:
   vol_window_sec: {body['vol_window_sec']}
   vol_max_move_bps: {body['vol_max_move_bps']}
   vol_cooldown_sec: {body['vol_cooldown_sec']}
-""")
+"""
+    # `make_cfg(x="OMIT")` = **把那一行從 YAML 裡拿掉**，於是走的是載入器
+    # 自己的預設值。沒有這個開關，任何「預設是 0」的測試驗的都是這個樣板
+    # 的預設值 —— 而 live 的設定檔根本沒有寫那一行,它靠的是載入器。
+    # 兩者不一致的時候,綠燈會出現在錯的那一邊（2026-09-15）。
+    yaml_text = "\n".join(ln for ln in yaml_text.splitlines()
+                          if "OMIT" not in ln)
+    f.write(yaml_text)
     f.close()
     return load_config(f.name, NO_ENV, symbol="SNDK", hedge_venue="lighter-rh")
 

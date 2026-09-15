@@ -60,6 +60,17 @@ def test_default_is_byte_for_byte_todays_behaviour():
     assert _halts(eng), "0 秒寬限下第一次超過水位竟然沒有 HALT"
 
 
+def test_config_without_the_key_loads_as_zero():
+    """**live 的設定檔沒有寫 `net_grace_sec`。** 所以真正保護現況的是
+    載入器的預設值，不是上面那個樣板裡的 0.0 —— 上一關驗的是樣板，
+    這一關驗的是 `config_MON.yaml` 實際會走的那條路（2026-09-15）。"""
+    eng = make_engine(net_grace_sec="OMIT")
+    assert eng.cfg.net_grace_sec == 0.0, \
+        "設定檔沒寫這個 key 時，載入器的預設不是 0 —— 寬限期會靜默生效"
+    _arm(eng, net=150.0, cap=100.0)
+    assert _halts(eng), "載入器預設之下第一次超過水位竟然沒有 HALT"
+
+
 def test_within_grace_does_not_halt():
     """寬限期內不 HALT —— 掛單對沖正在等成交，那不是失敗。"""
     eng = make_engine(net_grace_sec=30.0)
