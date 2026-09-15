@@ -9,7 +9,8 @@ T=60，成交 92.9%，**markout_60 = −3.1 bps，CI [−3.4, −2.8]**——守
 被動單每筆虧 3 bps，逆選擇在成交那一分鐘就完成（成交後漂移 ≈ 0）。
 小場館若接近零或為正，「沒人守」就從直覺變成數字。
 
-**定義（照 flow_system/research/subhourly/PREREG_passive_markout.md，逐字）**
+**定義（照 flow_system/research/subhourly/PREREG_passive_markout.md，逐字；
+2026-09-15 起 arb 內副本 `research/hmm_gate0/PREREG_passive_markout.md`）**
   掛單事件  分鐘 t、方向 s（+1 掛在 bid 買／−1 掛在 ask 賣）、價 p = 該側 top-of-book、
             有效期 T 分鐘。每 STEP 分鐘雙邊各一張（無條件）。
   成交判定  主規則：買 bid(t′) ≤ p／賣 ask(t′) ≥ p（我們成為 best 被打到）

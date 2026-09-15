@@ -44,8 +44,10 @@ import requests
 HL = "https://api.hyperliquid.xyz/info"
 LIGHTER = "https://mainnet.zklighter.elliot.ai"
 HERE = os.path.dirname(os.path.abspath(__file__))
+# 2026-09-15：原本讀 ../flow_system/research/results/，違反隔離規則（CLAUDE.md §1）。
+# 改讀複製進 arb 的那一份（research/hmm_gate0/README.md）。
 MARKOUT = os.path.normpath(os.path.join(
-    os.path.dirname(HERE), "..", "flow_system", "research", "results",
+    os.path.dirname(HERE), "research", "hmm_gate0", "results",
     "sweep_markout.json"))
 MISMATCH_PCT = 5.0
 # 價格反查別名的容忍度。3% 是「同一個資產在兩個場館」的合理上界,
