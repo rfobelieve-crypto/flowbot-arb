@@ -134,6 +134,7 @@ def make_cfg(**over):
         "maker_poll_sec": 0.01, "max_net_base": 0.003,
         "net_grace_sec": 0.0, "max_daily_loss_usd": 0.0,
         "hedge_maker_timeout_sec": 0.0,
+        "hedge_maker_poll_sec": 0.0,
         "maker_reprice_bps": 0.0, "staleness_sec": 5.0,
         "vol_window_sec": 30.0, "vol_max_move_bps": 0.0,
         "vol_cooldown_sec": 60.0,
@@ -166,6 +167,7 @@ execution:
   maker_poll_sec: {body['maker_poll_sec']}
   maker_reprice_bps: {body['maker_reprice_bps']}
   hedge_maker_timeout_sec: {body['hedge_maker_timeout_sec']}
+  hedge_maker_poll_sec: {body['hedge_maker_poll_sec']}
   staleness_sec: {body['staleness_sec']}
   premium_persist_sec: 0.0
   net_tolerance_base: 0.001

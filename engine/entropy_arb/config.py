@@ -206,6 +206,11 @@ class Config:
     max_net_base: float
     net_grace_sec: float
     hedge_maker_timeout_sec: float
+    # 對沖腿掛單的輪詢間隔（2026-09-15）。0.0 = 舊行為 min(maker_poll_sec, 0.25)。
+    # 報價腿在 Lighter,poll 讀 WS 快取不花錢;對沖腿在 HL,poll 是 REST
+    # `orderStatus`（權重 2,IP 上限 1200/分）—— 0.05 秒一次理論上 2400/分,
+    # 一個人就把整台機器的額度吃光。理由與事故經過見 engine._hedge_poll_interval。
+    hedge_maker_poll_sec: float
     # B4 (2026-09-04): the session mark-to-market floor. The engine halts
     # when session PnL drops below -this. Constant cost: session_pnl() is a
     # sum over two venues, no I/O. 0 = disabled (not recommended once live).
@@ -389,6 +394,7 @@ _SCHEMA: Dict[str, Any] = {
         # 0.0 = 關閉（預設）。理由見 engine._maker_cancel_reason。
         "maker_reprice_bps": float,
         "hedge_maker_timeout_sec": float,  # 對沖先掛單試多久,0=直接吃單
+        "hedge_maker_poll_sec": float,  # 對沖掛單輪詢間隔,0=舊行為
         "maker_min_edge_bps": float,  # B3: cancel a quote whose edge decayed
         "premium_persist_sec": float,
         "cooldown_sec": float,
@@ -524,6 +530,12 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         raise ConfigError(
             "execution.hedge_maker_timeout_sec must be >= 0 "
             "(0 = 直接吃單,今天的行為)")
+    hedge_maker_poll_sec = float(
+        _get(raw, "execution", "hedge_maker_poll_sec", 0.0))
+    if hedge_maker_poll_sec < 0:
+        raise ConfigError(
+            "execution.hedge_maker_poll_sec must be >= 0 "
+            "(0 = 舊行為 min(maker_poll_sec, 0.25))")
     if net_grace_sec < 0:
         raise ConfigError("risk.net_grace_sec must be >= 0 (0 = 今天的行為)")
     max_daily_loss_usd = float(_get(raw, "risk", "max_daily_loss_usd", 0.0))
@@ -722,6 +734,7 @@ def load_config(config_file: str = "config.yaml", env_file: str = ".env", *,
         max_net_base=max_net_base,
         net_grace_sec=net_grace_sec,
         hedge_maker_timeout_sec=hedge_maker_timeout_sec,
+        hedge_maker_poll_sec=hedge_maker_poll_sec,
         max_daily_loss_usd=max_daily_loss_usd,
         max_gross_usd=max_gross_usd,
         max_account_gross_usd=max_account_gross_usd,

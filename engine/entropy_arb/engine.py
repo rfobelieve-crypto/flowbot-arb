@@ -130,6 +130,11 @@ class Engine:
         # 用計數器不用布林:同時有兩腿在掛單對沖時,先回來的那個不可以把
         # 旗標清掉。
         self._hedge_maker_inflight = 0
+        # 撤單沒確認的**對沖腿**掛單（2026-09-15）。它們可能還在簿上,
+        # 所以**不可以忘掉**（CLAUDE.md §2.3：本地狀態只能被交易所的回報清除）。
+        # 留在這裡直到交易所回報終態;期間 _we_touched 認得它、新報價暫停。
+        # 事故與理由見 _service_hedge_orphans。
+        self._hedge_orphans: List[MakerOrder] = []
         # B5: operator pause is NOT a halt. It stops opening; it never stops
         # hedging, flattening, self-rescue or reconcile, and it is reversible
         # from the control channel. `halted` is not.
@@ -482,6 +487,20 @@ class Engine:
                 timeout=(cfg.settle_timeout_sec
                          + (cfg.cancel_timeout_sec * 2 + 3.0
                             if cfg.mode == "maker" else 0.0) + 2.0))
+        # 撤單沒確認的對沖單：關機前再撤一次（best effort）。沒撤掉也不假裝
+        # 撤掉了 —— 下次啟動的 _cancel_stale_orders 會掃到它。
+        for o in list(self._hedge_orphans):
+            v = self.venues.get(o.venue_key)
+            if v is None:
+                continue
+            try:
+                await v.cancel_order(o.handle)
+            except Exception as e:                              # noqa: BLE001
+                log.warning("[HEDGE ORPHAN] shutdown cancel raised: %r", e)
+            log.critical("SHUTTING DOWN WITH AN UNRESOLVED HEDGE ORDER: %s — "
+                         "the next start's stale-order sweep will cancel it; "
+                         "check the venue by hand if it does not restart",
+                         o.describe())
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -995,6 +1014,13 @@ class Engine:
         """
         cfg = self.cfg
         if self._maker_open:
+            return None
+        if self._hedge_orphans:
+            # 一張撤單沒確認的對沖單可能還會成交。在它有結果之前再開一筆,
+            # 兩個「可能」會疊在同一條腿上 —— 跟 UNKNOWN 的報價單擋住下一張
+            # 是同一條規則,只是那張單住在對沖腿。
+            self._skiplog("maker quote deferred: %d unresolved hedge order(s)",
+                          len(self._hedge_orphans))
             return None
         maker_v, taker_v = self._maker_legs()
         fresh = (maker_v.book.tradeable(cfg.staleness_sec)
@@ -1587,9 +1613,10 @@ class Engine:
                      str(res.get("err"))[:80])
             return self._book_hedge_fill(taker_v, is_buy, filled, avg or px)
 
+        poll_iv = self._hedge_poll_interval()
         deadline = t0 + self.cfg.hedge_maker_timeout_sec
         while time.time() < deadline and filled < qty:
-            await asyncio.sleep(min(self.cfg.maker_poll_sec, 0.25))
+            await asyncio.sleep(poll_iv)
             try:
                 st = await taker_v.poll_order(handle)
             except Exception:                                   # noqa: BLE001
@@ -1616,12 +1643,15 @@ class Engine:
             #
             # 確認不到的時候**仍然送吃單**（不可以裸著），但要**大聲說**,
             # 否則下一次的 HALT 又會長得像「有人動了我們的帳戶」。
-            try:
-                c = await taker_v.cancel_order(handle)
-            except Exception as e:                              # noqa: BLE001
-                c = {"status": "send-failed", "err": repr(e)}
-            if c.get("err"):
-                log.warning("[HEDGE MAKER] 撤單回錯:%s", str(c.get("err"))[:90])
+            #
+            # **撤單被拒要在預算內重送**（2026-09-15 第二次咬）。15:13:58
+            # 那張撤單回 `RATE_LIMITED: HTTP 429`,舊版只送一次,剩下的預算
+            # 全部拿去輪詢一張根本沒被撤的單 -> 未確認 -> 吃單 -> 那張掛單
+            # 21 分鐘後成交 -> HALT。撤單本來就冪等（HL 對已撤的單回
+            # "already canceled" = gone),重送不會多出任何東西。
+            cancel_ok = await self._hedge_cancel_once(taker_v, handle)
+            last_cx = time.time()
+            retry_gap = max(poll_iv, 0.5)
             dl2 = time.time() + max(self.cfg.cancel_timeout_sec, 0.5)
             while time.time() < dl2:
                 try:
@@ -1635,11 +1665,28 @@ class Engine:
                 if st.get("terminal"):
                     confirmed = True
                     break
-                await asyncio.sleep(min(self.cfg.maker_poll_sec, 0.25))
+                if not cancel_ok and time.time() - last_cx >= retry_gap:
+                    cancel_ok = await self._hedge_cancel_once(taker_v, handle)
+                    last_cx = time.time()
+                await asyncio.sleep(poll_iv)
             if not confirmed:
-                log.error("[HEDGE MAKER] **撤單沒有確認** — 那張單可能還在簿上，"
-                          "稍後成交會造成過度對沖（淨額對沖／自救會收掉，"
-                          "但會先 HALT）。handle=%s", handle)
+                # **不可以忘掉它**（CLAUDE.md §2.3）。舊版在這裡把 handle 丟掉,
+                # 於是那張單後來成交時,引擎只看得到「部位自己動了」——
+                # 21 分鐘後 `_we_touched` 早就過了歸因窗口,判成「有人動了帳戶」
+                # 而 HALT。登記起來,由對帳迴圈繼續撤、繼續問,直到交易所
+                # 給出終態;期間那條腿的部位變動算我們的,交給淨額對沖。
+                orphan = MakerOrder(venue_key=taker_v.key, is_buy=is_buy,
+                                    qty=qty, px=px, sent_ts=t0, handle=handle)
+                orphan.apply("open", filled, avg)
+                orphan.request_cancel(time.time())
+                orphan.to_unknown("hedge cancel unconfirmed")
+                orphan.stats["known_filled"] = filled
+                orphan.stats["last_log"] = time.time()
+                self._hedge_orphans.append(orphan)
+                log.error("[HEDGE MAKER] **撤單沒有確認** — 那張單可能還在簿上。"
+                          "已登記追蹤（對帳迴圈會繼續撤單直到交易所回報終態），"
+                          "期間暫停新報價；若它稍後成交，淨額對沖會收掉過度對沖。"
+                          "handle=%s", handle)
         log.info("[HEDGE MAKER] %s %.6g/%.6g @%.8g in %.2fs — %s（撤單%s）",
                  "BUY" if is_buy else "SELL", filled, qty, px,
                  time.time() - t0,
@@ -1647,6 +1694,103 @@ class Engine:
                  "已確認" if confirmed else "**未確認**")
         order.stats["hedge_maker_ms"] = (time.time() - t0) * 1e3
         return self._book_hedge_fill(taker_v, is_buy, filled, avg or px)
+
+    def _hedge_poll_interval(self) -> float:
+        """對沖腿掛單的輪詢間隔。
+
+        **0.0 = 舊行為 `min(maker_poll_sec, 0.25)`**,所以沒寫這個 key 的設定
+        逐位元組不變。為什麼要另外一個旋鈕（2026-09-15 MON HALT 的根因之一）:
+        `maker_poll_sec` 是為**報價腿**調的 —— Lighter 的 poll_order 讀 WS
+        快取,0.05 秒一次不花錢（config_MON.yaml 的註解說的就是這件事）。
+        但這條路徑的 poll_order 在 **HL**,是 REST `orderStatus`:
+        權重 2、每 IP 上限 1200/分（HL 官方文件,2026-09-15 查證）。
+        0.05 秒一次 = 理論上 2400/分,光這一支 30 秒的迴圈就吃掉整台機器
+        的額度,而同一個 IP 上還有九支錄製器與 flow_system 每小時的 HL 錄製。
+        那一次的撤單正是在迴圈結尾拿到 429。
+        """
+        if self.cfg.hedge_maker_poll_sec > 0:
+            return self.cfg.hedge_maker_poll_sec
+        return min(self.cfg.maker_poll_sec, 0.25)
+
+    async def _hedge_cancel_once(self, taker_v, handle) -> bool:
+        """送一次撤單。回傳**交易所是否接受了這個請求**（accepted / gone）。
+
+        True 不代表那張單死了 —— 那只能由 poll_order 的終態回答（maker.py
+        必須 #1）。False 代表要重送：被拒（含 429）、未決、或送的時候炸了。
+        絕不拋例外：這條路上拋例外 = 對沖腿裸著。
+        """
+        self._record_send(taker_v)
+        try:
+            c = await taker_v.cancel_order(handle)
+        except Exception as e:                                  # noqa: BLE001
+            c = {"status": "send-failed", "err": repr(e)}
+        if c.get("err"):
+            log.warning("[HEDGE MAKER] 撤單回錯:%s", str(c.get("err"))[:90])
+        return c.get("status") in ("accepted", "gone")
+
+    async def _service_hedge_orphans(self) -> None:
+        """讓每一張撤單沒確認的對沖單走到交易所給的終態。對帳迴圈每一輪呼叫。
+
+        **2026-09-15 15:13–15:34 MON 的事故，逐步：**
+
+            15:13:58  HL 撤單回 429 -> 撤單未確認 -> 殘量改吃單（這一步是對的）
+            （舊版在這裡把那張 post-only BUY 661 **忘掉了**）
+            ……那張單後來成交,HL 多了 +661
+            15:34:52  對帳：部位動了而我們 1251 秒沒下單 -> 「強平/ADL/有人動帳戶」
+                      -> HALT -> 自救賣回 660
+
+        帳最後是平的,但引擎停了,而且 HALT 的理由是**錯的** —— 不是別人,
+        是我們自己一張沒追蹤的單。這裡做三件事:
+          1. 每輪問一次交易所（權重 2,15 秒一次,不會再成為限流來源）;
+          2. 還沒終態就再撤一次（冪等）;
+          3. 終態了才移除。若成交比我們知道的多,**不在本地記帳**
+             （對帳採信鏈上完整讀數之後不准再疊本地 delta,§2.4）,
+             只蓋上 last_traded_ts 讓接下來的對帳把這筆變動歸因給我們,
+             並觸發對帳 -> 淨額對沖收掉過度對沖。
+
+        **不放棄**：HL 若一直不給終態,就一直留著、一直暫停新報價、每分鐘
+        CRITICAL 一次。重啟會由 `_cancel_stale_orders` 清掉簿上的殘單,
+        那是人的決定。
+        """
+        if not self._hedge_orphans:
+            return
+        now = time.time()
+        for o in list(self._hedge_orphans):
+            v = self.venues.get(o.venue_key)
+            if v is None:
+                continue
+            try:
+                st = await v.poll_order(o.handle)
+            except Exception as e:                              # noqa: BLE001
+                st = {"status": "unknown", "err": repr(e)}
+            if st and st.get("status") not in (None, "", "unknown"):
+                o.apply(st["status"], st.get("filled_base"), st.get("avg_px"))
+            if o.is_terminal:
+                self._hedge_orphans.remove(o)
+                extra = o.filled_base - float(o.stats.get("known_filled", 0.0))
+                if extra > 1e-12:
+                    v.last_traded_ts = time.time()
+                    log.critical(
+                        "[HEDGE ORPHAN] resolved: %s — it filled %.6g MORE after "
+                        "we gave up on it. The venue position already contains "
+                        "it; reconcile will adopt the chain and the net-delta "
+                        "hedge will take the over-hedge back. / 未確認的對沖單"
+                        "事後成交了，交給對帳與淨額對沖", o.describe(), extra)
+                else:
+                    log.warning("[HEDGE ORPHAN] resolved cleanly (%s): %s",
+                                o.status, o.describe())
+                self._reconcile_evt.set()
+                continue
+            if await self._hedge_cancel_once(v, o.handle):
+                o.request_cancel(now)
+            else:
+                o.cancel_attempts += 1
+            if now - float(o.stats.get("last_log", 0.0)) >= 60.0:
+                o.stats["last_log"] = now
+                log.critical("HEDGE ORDER STILL UNRESOLVED (%d cancel attempts): "
+                             "%s — new quotes stay paused; still retrying, the "
+                             "engine does not give up", o.cancel_attempts,
+                             o.describe())
 
     def _book_hedge_fill(self, taker_v, is_buy: bool, filled: float,
                          px: float) -> float:
@@ -1950,6 +2094,8 @@ class Engine:
             state.append("DOWN: " + ",".join(self._venue_down))
         for o in self._maker_open.values():
             state.append("RESTING " + o.describe())
+        for o in self._hedge_orphans:
+            state.append("UNRESOLVED HEDGE " + o.describe())
         if self._recorder_dead:
             state.append("RECORDER DEAD")
         bits.append("state: " + ("; ".join(state) if state else "trading"))
@@ -2198,7 +2344,7 @@ class Engine:
         real positions, each of which becomes naked the moment its venue
         misbehaves. A resting quote counts too -- it can fill at any moment.
         """
-        if self._maker_open:
+        if self._maker_open or self._hedge_orphans:
             return True
         tol = self.cfg.net_tolerance_base
         return any(abs(v.position) > tol for v in self.venues.values())
@@ -2600,7 +2746,8 @@ class Engine:
             if (self.cfg.unexplained_position_halt
                     and not strict
                     and abs(delta) > self.cfg.net_tolerance_base
-                    and not self._we_touched(v, now)):
+                    and not self._we_touched(v, now)
+                    and not self._orphan_explains(v, delta)):
                 self.unexplained_events += 1
                 self._risk_halt(
                     f"[{v.name}] position moved {delta:+.6g} with no order "
@@ -2649,6 +2796,32 @@ class Engine:
         # exactly what keeps reconcile out of this venue in the first place.
         return now - v.last_traded_ts <= self._attribution_window()
 
+    def _orphan_explains(self, v, delta: float) -> bool:
+        """這個部位變動能不能由這條腿上撤單未確認的對沖單解釋。
+
+        **有方向、有上限**（2026-09-15 審查抓到的）。第一版是「這條腿有 orphan
+        就算我們的」—— 而 orphan 設計上可以無限期存在（HL 一直不給終態時），
+        於是那段期間**任何大小、任何方向**的強平／ADL／手動單都會被安靜採信,
+        不 HALT。那等於用一張 $15 的單把「有人動了帳戶」這道守衛整個關掉。
+
+        所以只接受：跟 orphan 同方向（買單只會讓部位變多）、而且不超過它們
+        **還沒成交的殘量**加上容忍值。超過的部分就是別人的，照舊 HALT。
+        多張 orphan 時兩個方向分開加總。
+        """
+        tol = self.cfg.net_tolerance_base
+        up = down = 0.0
+        for o in self._hedge_orphans:
+            if o.venue_key != v.key:
+                continue
+            room = max(o.qty - float(o.stats.get("known_filled", 0.0)), 0.0)
+            if o.is_buy:
+                up += room
+            else:
+                down += room
+        if up <= 0.0 and down <= 0.0:
+            return False
+        return -(down + tol) <= delta <= up + tol
+
     async def _reconcile_loop(self) -> None:
         while not self.stop.is_set():
             try:
@@ -2660,6 +2833,14 @@ class Engine:
                 pass
             if self.stop.is_set():
                 break
+            # 先把未確認的對沖單問清楚,再讀部位：同一輪裡如果它剛成交,
+            # 下面的對帳要看得到「它是我們的」（_we_touched）。
+            try:
+                await self._service_hedge_orphans()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("hedge orphan service failed")
             try:
                 await self._reconcile_positions(hedge=True)
             except asyncio.CancelledError:
@@ -2769,6 +2950,9 @@ class Engine:
                     rec += f" | RESTING {o.describe()}"
                 if self.maker_unknown:
                     rec += f" | *** UNRESOLVED CANCELS x{self.maker_unknown} ***"
+                if self._hedge_orphans:
+                    rec += (f" | *** UNRESOLVED HEDGE ORDERS "
+                            f"x{len(self._hedge_orphans)} ***")
                 if self.maker_account_rejects:
                     rec += (f" | *** ACCOUNT REJECTS "
                             f"x{self.maker_account_rejects} ***")

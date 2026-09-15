@@ -266,6 +266,16 @@ def look(pair: str) -> tuple[list, dict]:
                     UNRESOLVED_WINDOW_MIN) > 0:
                 probs.append("**撤單確認不了,引擎卡著** —— 它不會自己好,"
                              "要重啟（啟動時的 REST 掃單會清掉）")
+            # **對沖腿**的同一種狀況（2026-09-15 新增）。字刻意不同:
+            # `halt_recover.py` 看到上面那句累積 100 次就會自動重啟,而對沖腿
+            # 那張單可能真的還在簿上、可能成交 —— 要人看,不要自動殺。
+            # 引擎在它有結果之前暫停新報價,所以症狀跟上面一樣是「卡著」。
+            if _window_ok(txt, UNRESOLVED_WINDOW_MIN) and _count_recent(
+                    txt, "HEDGE ORDER STILL UNRESOLVED",
+                    UNRESOLVED_WINDOW_MIN) > 0:
+                probs.append("**對沖腿有一張撤單確認不了的掛單** —— 可能還在 HL "
+                             "簿上;引擎持續撤單並暫停新報價。先到 HL 看那張單,"
+                             "再決定要不要重啟")
 
         except Exception:
             pass
