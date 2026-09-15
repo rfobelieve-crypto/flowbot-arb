@@ -185,6 +185,42 @@ def test_cancel_failure_still_falls_back_to_taker():
     assert v.sent_takers, "撤單失敗就不吃單了 —— 那會裸著"
 
 
+def test_fill_that_lands_during_the_cancel_is_caught():
+    """**撤單送出去之後才成交 -> 必須在預算內抓到，不可以再吃一次單。**
+
+    這是實盤 2026-09-15 13:25 咬到的那一筆:撤掉的 post-only SELL 658
+    沒有真的被撤掉，90 秒後成交 -> HL 多空了 657 -> 過度對沖 -> HALT ->
+    自救買回。那一筆掛單對沖要省 $0.003，這個失效花掉 $0.010 加四分鐘停機。
+    """
+    eng = make_engine(hedge_maker_timeout_sec=0.05)
+    v = _venue()
+    v.send_maker_result = {"status": "resting", "filled_base": 0.0}
+    v.ex_filled, v.ex_status = 0.0, "open"
+
+    def fills_on_cancel(vv):
+        vv.ex_filled, vv.ex_status = 10.0, "filled"   # 撤單那一刻成交了
+    v.on_cancel = fills_on_cancel
+
+    run(eng._hedge_maker_fill(eng.entropy, v, _order(), 10.0))
+    assert not v.sent_takers, \
+        "撤單後才成交卻還去吃單 —— 那就是實盤那次的過度對沖"
+    assert abs(v.position + 10.0) < 1e-9, "部位不是一張單:%s" % v.position
+
+
+def test_unconfirmed_cancel_still_hedges():
+    """**確認不到仍然要吃單。** 不可以因為不確定就裸著 ——
+    裸著比過度對沖貴得多（過度對沖有淨額對沖會收，裸著沒有）。"""
+    eng = make_engine(hedge_maker_timeout_sec=0.05)
+    v = _venue()
+    v.send_maker_result = {"status": "resting", "filled_base": 0.0}
+    v.ex_filled, v.ex_status = 0.0, "open"
+    v.poll_answers = False              # 交易所什麼都不肯說
+    t0 = time.time()
+    run(eng._hedge_maker_fill(eng.entropy, v, _order(), 10.0))
+    assert v.sent_takers, "撤單確認不到就不吃單了 —— 那會裸著"
+    assert time.time() - t0 < 3.0, "確認沒有預算，等太久了"
+
+
 def test_post_only_rests_on_our_own_side():
     """post-only 要掛在**自己這一側的觸價**。
 

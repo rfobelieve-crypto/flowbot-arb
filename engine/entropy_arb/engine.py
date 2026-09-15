@@ -125,6 +125,11 @@ class Engine:
         # 「現在失衡」與「失衡一直好不了」是兩件事，只有後者代表對沖失敗 ——
         # 而純水位的閘門分不出來，那讓掛單對沖結構上不可能（2026-09-15）。
         self._net_over_since = None
+        # 有幾個掛單對沖正在等成交。>0 時淨額對沖不可以自己去平那個失衡 ——
+        # 它會把剛成交的那一腿買回去（理由寫在 _maybe_hedge 的使用點）。
+        # 用計數器不用布林:同時有兩腿在掛單對沖時,先回來的那個不可以把
+        # 旗標清掉。
+        self._hedge_maker_inflight = 0
         # B5: operator pause is NOT a halt. It stops opening; it never stops
         # hedging, flattening, self-rescue or reconcile, and it is reversible
         # from the control channel. `halted` is not.
@@ -1527,7 +1532,16 @@ class Engine:
             self._reconcile_evt.set()
             return
         order.mark_hedged(pend)   # attempted exactly once, whatever happens
-        await self._hedge_maker_fill(maker_v, taker_v, order, pend)
+        # **這段期間淨額對沖不可以插手**（2026-09-15，理由在 _maybe_hedge
+        # 的使用點）。範圍刻意蓋住**整個** _hedge_maker_fill，不只掛單那一
+        # 段：吃單 fallback 那 ~1 秒（實測 hedge_ms p50 934 ms）有同一個
+        # 競態，而那個是**既有的** —— 對帳每 15 秒跑一次，所以約 6% 的成交
+        # 本來就暴露在它下面。try/finally 保證計數器一定回得來。
+        self._hedge_maker_inflight += 1
+        try:
+            await self._hedge_maker_fill(maker_v, taker_v, order, pend)
+        finally:
+            self._hedge_maker_inflight -= 1
 
     async def _hedge_try_maker(self, taker_v, is_buy: bool, qty: float,
                                order: MakerOrder) -> float:
@@ -1586,16 +1600,51 @@ class Engine:
             avg = st.get("avg_px") or avg
             if st.get("terminal"):
                 break
-        if filled < qty:
-            # 撤單送出去就好，**不等確認**（理由在 docstring）。
+        confirmed = filled >= qty
+        if not confirmed:
+            # **撤單要確認，但有預算**（2026-09-15 稍晚改的，理由是實盤咬過）。
+            #
+            # 第一版是「送出去就好，不等確認」,理由是撤單確認當天死鎖過兩次。
+            # **而那個版本在第一筆成交就付了代價**:13:25:37 撤掉的那張
+            # post-only SELL 658 **沒有真的被撤掉**,90 秒後成交 ->
+            # HL 多空了 657 -> 過度對沖 -> HALT -> 自救買回（$0.010 + 四分鐘停機,
+            # 而那一筆掛單對沖本來要省的是 $0.003）。
+            #
+            # 那不是「不等確認」的錯,是「**無界地等**」才會死鎖。有預算的等
+            # 不會死鎖:`cancel_timeout_sec` 到了就走人。實測 HL 撤單往返
+            # 757 ms,3 秒的預算是四倍餘裕。
+            #
+            # 確認不到的時候**仍然送吃單**（不可以裸著），但要**大聲說**,
+            # 否則下一次的 HALT 又會長得像「有人動了我們的帳戶」。
             try:
-                await taker_v.cancel_order(handle)
-            except Exception:                                   # noqa: BLE001
-                pass
-        log.info("[HEDGE MAKER] %s %.6g/%.6g @%.8g in %.2fs — %s",
+                c = await taker_v.cancel_order(handle)
+            except Exception as e:                              # noqa: BLE001
+                c = {"status": "send-failed", "err": repr(e)}
+            if c.get("err"):
+                log.warning("[HEDGE MAKER] 撤單回錯:%s", str(c.get("err"))[:90])
+            dl2 = time.time() + max(self.cfg.cancel_timeout_sec, 0.5)
+            while time.time() < dl2:
+                try:
+                    st = await taker_v.poll_order(handle)
+                except Exception:                               # noqa: BLE001
+                    break
+                got = st.get("filled_base")
+                if got is not None:
+                    filled = max(filled, float(got))
+                avg = st.get("avg_px") or avg
+                if st.get("terminal"):
+                    confirmed = True
+                    break
+                await asyncio.sleep(min(self.cfg.maker_poll_sec, 0.25))
+            if not confirmed:
+                log.error("[HEDGE MAKER] **撤單沒有確認** — 那張單可能還在簿上，"
+                          "稍後成交會造成過度對沖（淨額對沖／自救會收掉，"
+                          "但會先 HALT）。handle=%s", handle)
+        log.info("[HEDGE MAKER] %s %.6g/%.6g @%.8g in %.2fs — %s（撤單%s）",
                  "BUY" if is_buy else "SELL", filled, qty, px,
                  time.time() - t0,
-                 "省下吃單費" if filled >= qty else "殘餘交給吃單")
+                 "省下吃單費" if filled >= qty else "殘餘交給吃單",
+                 "已確認" if confirmed else "**未確認**")
         order.stats["hedge_maker_ms"] = (time.time() - t0) * 1e3
         return self._book_hedge_fill(taker_v, is_buy, filled, avg or px)
 
@@ -2368,6 +2417,24 @@ class Engine:
                                 f"-${floor:.2f}")
                 return
         if abs(net) > self.cfg.net_tolerance_base:
+            # **掛單對沖正在等成交時,這個失衡是預期中的,不可以去「修」它。**
+            #
+            # 2026-09-15,開了 hedge_maker_timeout_sec 之後才發現的:
+            # `_hedge` 減的是**帶著失衡的那一腿**,而掛單對沖期間帶著失衡的
+            # 正好是**掛單腿**（Lighter 剛成交、對沖腿還沒上）。所以它會去
+            # Lighter 把我們剛成交的單買回去 —— 吃單費 2.80 ＋ 穿 10.7 bps
+            # 的價差,而我們捕獲的半價差只有 7.67。**那一筆直接變成大虧,
+            # 而且是「風控」造成的。**
+            #
+            # 為什麼 venue lock 擋不住:`_hedge_try_maker` 只在 send_maker
+            # 那一瞬間握鎖,輪詢期間兩把鎖都是放開的（放開是對的,不然
+            # 30 秒的對沖會把報價與對帳一起凍住）。
+            #
+            # **上面每一道 HALT 都照跑** —— 這裡擋的只有「自動去平它」。
+            # 所以「掛單對沖卡住不回來」仍然會在 net_grace_sec 之後 HALT,
+            # 原本的失效模式一個都沒有消失。
+            if self._hedge_maker_inflight:
+                return
             await self._hedge(net)
 
     async def _hedge(self, net: float) -> None:

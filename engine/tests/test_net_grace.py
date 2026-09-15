@@ -113,12 +113,18 @@ def test_grace_does_not_leak_into_other_halts():
     eng = make_engine(net_grace_sec=300.0, max_daily_loss_usd=1.0)
     _arm(eng, net=0.0, cap=100.0)                 # 曝險沒問題
     eng._session_pnl = lambda: -50.0
-    # 只驗一件事:虧損那條的判斷不看 _net_over_since
+
+    # **掃的是程式碼，不是原始文字。** 2026-09-15 這一關因為我在
+    # `max_daily_loss` 之後寫了一行**註解**提到 net_grace_sec 就紅了 ——
+    # 一個分不出註解與程式碼的守衛，紅的時候不會告訴你是哪一種
+    # （mistake.md 2026-09-12:守衛的統計量要有它宣稱的那個分辨力）。
+    # 順手拿掉原本那行 `assert ... or True` —— 它恆真，什麼都沒測。
     import inspect
-    src = inspect.getsource(type(eng)._maybe_hedge)
-    i_net = src.index("net_grace_sec")
-    i_pnl = src.index("max_daily_loss")
-    seg = src[i_net:i_pnl]
-    assert "_net_over_since" not in seg.split("elif")[-1] or True
-    assert "net_grace_sec" not in src[i_pnl:], \
-        "每日虧損那條被寬限期汙染了 —— kill switch 不可以變慢"
+    lines = [ln for ln in inspect.getsource(type(eng)._maybe_hedge).splitlines()
+             if not ln.lstrip().startswith("#")]
+    code = "\n".join(lines)
+    i_pnl = code.index("max_daily_loss")
+    after = code[i_pnl:]
+    for name in ("net_grace_sec", "_net_over_since"):
+        assert name not in after, \
+            "每日虧損那條被 %s 汙染了 —— kill switch 不可以變慢" % name
