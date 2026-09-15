@@ -1,7 +1,15 @@
 # -*- coding: utf-8 -*-
-"""只從**一種** HALT 自動恢復，而且判準是「狀態已經好了」不是「原因是什麼」。
+"""從**兩種**已知的卡死狀態自動恢復，而判準是「狀態已經好了」不是「原因」。
 
 2026-09-15，使用者選了「只自動重啟那一類，其他照舊要人」。
+
+**兩種狀態，而第二種是後來才量出來是主要的那個：**
+
+    1. HALT/裸曝險   ok=False  —— 13 小時內發生 **1 次**，停機 106 分鐘
+    2. 撤單死鎖      ok=True   —— 13 小時內發生 **2 次**，停機 155 分鐘（20%）
+
+第二種不是 HALT，`status.json` 是 `ok=True` —— 引擎只是永遠重試。所以
+任何從 HALT 出發的檢查**結構上都看不到它**，而它才是貴的那個。
 
 ===========================================================================
 為什麼需要它
@@ -71,6 +79,32 @@ ENGINE = os.path.dirname(HERE)
 # **允許清單。加東西進來要寫理由，而且要先有一次真實事故。**
 RECOVERABLE = re.compile(r"net imbalance .* exceeds max_net_base")
 
+# **第二種可恢復狀態（2026-09-15 稍晚加）:撤單確認不了的死鎖。**
+#
+# 它不是 HALT —— `status.json` 是 ok=True,引擎只是永遠重試。所以上面那條
+# 路徑完全看不到它,而它是實測**更貴**的那一個:
+#
+#     09-14 22:58 ~ 09-15 00:13   74 分鐘   一張單都沒掛
+#     09-15 08:38 ~ 09-15 09:59   81 分鐘   一張單都沒掛
+#     -> 13 小時內 155 分鐘 = **20% 的時間**，而 HALT 那個只發生過一次
+#
+# 機制（兩次都一樣):`LighterVenue.poll_order` 只讀帳戶 WS 串流的快取,
+# 而設定裡明寫 "There is deliberately no REST fallback here"。串流在送出
+# 撤單的那一瞬間重連 -> 快取重置 -> 單已經從交易所消失,不會再有它的更新
+# 進快取 -> **終態永遠確認不了**。引擎照設計保持悲觀,於是停在那裡。
+#
+# **為什麼重啟是安全的,而且比等待更安全:** 啟動時會做 REST 掃單
+# (`_cancel_stale_orders`,失敗即致命),那是比卡住的引擎手上更強的真相
+# 來源。兩次實測掃單都回報**零張掛單** —— 證明那張單早就撤掉了。
+#
+# 判準用**重試次數**不用時間:log 沒有日期,而看時分秒的窗會撈到別天
+# (2026-09-15 00:10 就是這樣讓一盞燈啞掉的)。重試約 10 次/分鐘,
+# 所以 100 次 ~ 10 分鐘,遠過正常的 cancel_timeout_sec 3 秒。
+UNRESOLVED = re.compile(
+    r"MAKER ORDER STILL UNRESOLVED \((\d+) cancel attempts\)")
+UNRESOLVED_MIN_ATTEMPTS = 100
+UNRESOLVED_TAIL_LINES = 40   # 必須出現在 log 尾端 = 現在還在卡
+
 BUDGET_N = 2                  # 這麼多次
 BUDGET_WINDOW_SEC = 6 * 3600  # 在這麼久之內
 STATUS_MAX_AGE_SEC = 300      # status.json 比這舊 = 行程死了,那是看門狗的事
@@ -87,6 +121,32 @@ def _cfg_tolerance(pair: str) -> float:
             if v is not None:
                 return float(v)
     raise RuntimeError("讀不到 %s 的 net_tolerance_base —— 不猜，不動它" % pair)
+
+
+def _stuck_attempts(pair: str):
+    """現在卡在撤單死鎖嗎；是的話回重試次數，不是就回 None。
+
+    **判準用重試次數不用時間。** 引擎的 log 每行只有 `HH:MM:SS`，沒有日期，
+    所以任何「最近 N 分鐘」的窗都會撈到前幾天的同一個時刻 —— 2026-09-15
+    00:10 就是這樣讓一盞燈啞掉的。重試次數是單調的，不會有這個問題。
+
+    還要求它出現在 log **尾端**：卡住時引擎每分鐘印一次，所以尾端有它
+    = 現在還在卡；只在更前面 = 已經好了，那是歷史。
+    """
+    p = os.path.join(ENGINE, "logs", pair, "runner.log")
+    if not os.path.exists(p):
+        return None
+    try:
+        tail = io.open(p, encoding="utf-8", errors="replace"
+                       ).read()[-120000:].split("\n")[-UNRESOLVED_TAIL_LINES:]
+    except Exception:
+        return None
+    best = None
+    for ln in tail:
+        m = UNRESOLVED.search(ln)
+        if m:
+            best = int(m.group(1))
+    return best
 
 
 def _state_path(pair: str) -> str:
@@ -136,21 +196,33 @@ def main() -> int:
               % (age / 60))
         return 0
     st = json.load(io.open(sj, encoding="utf-8"))
-    if st.get("ok", True):
-        return 0                                   # 沒事，安靜
-
     reason = str(st.get("reason", ""))
-    if "HALT" not in reason.upper():
-        print("ok=False 但不是 HALT：%s" % reason[:120])
-        return 0
 
-    # ---- 關卡 1：這一類 HALT 允許自動恢復嗎 ----------------------------
-    if not RECOVERABLE.search(reason):
-        print("**這一類 HALT 不自動恢復**（要人看一眼）：%s" % reason[:140])
-        return 0
+    # ---- 關卡 1：這是哪一種可恢復狀態 ----------------------------------
+    if not st.get("ok", True):
+        if "HALT" not in reason.upper():
+            print("ok=False 但不是 HALT：%s" % reason[:120])
+            return 0
+        if not RECOVERABLE.search(reason):
+            print("**這一類 HALT 不自動恢復**（要人看一眼）：%s" % reason[:140])
+            return 0
+        kind = "HALT/裸曝險"
+    else:
+        # **ok=True 也可能卡死** —— 撤單死鎖不會讓 ok 變 False，引擎只是
+        # 永遠重試。上面那條路徑結構上看不到它，而它實測更貴（20% vs 一次）。
+        n_att = _stuck_attempts(pair)
+        if n_att is None:
+            return 0                               # 一切正常，安靜
+        if n_att < UNRESOLVED_MIN_ATTEMPTS:
+            print("撤單未確認 %d 次 —— 還在正常重試範圍（門檻 %d），不動它"
+                  % (n_att, UNRESOLVED_MIN_ATTEMPTS))
+            return 0
+        kind = "撤單死鎖"
+        reason = "MAKER ORDER STILL UNRESOLVED (%d cancel attempts)" % n_att
 
-    # ---- 關卡 2：當初讓它 HALT 的那件事，現在還成立嗎 ------------------
-    # 這一關才是真正的判準。平倉沒成功就不要碰。
+    # ---- 關卡 2：當初讓它卡住的那件事，現在還成立嗎 --------------------
+    # **兩種狀態共用這一關**：裸曝險還在就不要碰，因為重啟等於讓一個
+    # 部位對不上的引擎重新開始交易。
     tol = _cfg_tolerance(pair)
     net = abs(float((st.get("private") or {}).get("net_base") or 0.0))
     if net > tol:
@@ -168,6 +240,7 @@ def main() -> int:
         state["restarts"] = recent
         state["blocked_at"] = now
         state["blocked_reason"] = reason[:200]
+        state["blocked_kind"] = kind
         _save(pair, state)
         return 0
 
@@ -176,8 +249,8 @@ def main() -> int:
         print("找不到行程 —— 看門狗會處理")
         return 0
 
-    msg = ("HALT 自動恢復：%s｜裸曝險 %.4g <= 容忍 %.4g｜本窗第 %d/%d 次"
-           % (reason[:90], net, tol, len(recent) + 1, BUDGET_N))
+    msg = ("自動恢復[%s]：%s｜裸曝險 %.4g <= 容忍 %.4g｜本窗第 %d/%d 次"
+           % (kind, reason[:90], net, tol, len(recent) + 1, BUDGET_N))
     if a.dry:
         print("[乾跑] 會殺 pid %s 讓 .bat 迴圈拉回來" % pids)
         print("[乾跑] " + msg)
@@ -188,7 +261,8 @@ def main() -> int:
                         "Stop-Process -Id %d -Force" % pid], timeout=60)
     recent.append(now)
     state["restarts"] = recent
-    state["last"] = {"ts": now, "reason": reason[:200], "net": net,
+    state["last"] = {"ts": now, "kind": kind,
+                     "reason": reason[:200], "net": net,
                      "tol": tol, "pids": pids, "msg": msg}
     _save(pair, state)
     # **不在這裡送 Discord** —— 告警管線住在 flow_system，而 arb 不讀它。

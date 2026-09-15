@@ -71,7 +71,7 @@ def test_recovers_when_the_condition_has_cleared(tmp_path, _no_kill, capsys):
     _mk(str(tmp_path), "MON", ok=False, reason=R_NET, net=0.2, tol=2.0)
     _call(str(tmp_path), "MON", [])
     out = capsys.readouterr().out
-    assert "HALT 自動恢復" in out, out
+    assert "自動恢復[HALT/裸曝險]" in out, out
     assert _no_kill, "該重啟卻沒有殺行程"
 
 
@@ -139,6 +139,82 @@ def test_healthy_engine_is_silent(tmp_path, _no_kill, capsys):
     assert not _no_kill
 
 
+def _log(tmp, pair, attempts, tail_pad=0):
+    """造一份 runner.log，最後幾行帶 UNRESOLVED。tail_pad = 之後再墊幾行。"""
+    p = os.path.join(tmp, "logs", pair, "runner.log")
+    lines = ["09:00:0%d INFO engine: [status] ok" % (i % 10) for i in range(50)]
+    if attempts is not None:
+        lines.append("09:59:07.736 CRITICAL engine: MAKER ORDER STILL "
+                     "UNRESOLVED (%d cancel attempts): hedge BUY 461@0.02275"
+                     % attempts)
+    lines += ["09:59:1%d INFO engine: [status] ok" % (i % 10)
+              for i in range(tail_pad)]
+    io.open(p, "w", encoding="utf-8").write("\n".join(lines))
+
+
+def test_recovers_from_the_cancel_deadlock(tmp_path, _no_kill, capsys):
+    """撤單死鎖：**ok=True**，所以任何從 HALT 出發的檢查都看不到它 ——
+    而它是 13 小時裡吃掉 20% 時間的那個（HALT 那個只發生過一次）。"""
+    tmp = str(tmp_path)
+    _mk(tmp, "MON", ok=True, reason="live, quoting", net=0.2, tol=2.0)
+    _log(tmp, "MON", attempts=814)
+    _call(tmp, "MON", [])
+    out = capsys.readouterr().out
+    assert "撤單死鎖" in out, out
+    assert _no_kill, "卡死了卻沒重啟"
+
+
+def test_normal_retries_are_left_alone(tmp_path, _no_kill, capsys):
+    """撤單重試本來就會發生（cancel_timeout_sec 3 秒）。
+    **次數少 = 正常，不可以碰** —— 不然每次撤單都在重啟引擎。"""
+    tmp = str(tmp_path)
+    _mk(tmp, "MON", ok=True, reason="live, quoting", net=0.2, tol=2.0)
+    _log(tmp, "MON", attempts=5)
+    _call(tmp, "MON", [])
+    out = capsys.readouterr().out
+    assert "正常重試範圍" in out, out
+    assert not _no_kill, "正常重試竟然觸發重啟"
+
+
+def test_old_deadlock_further_up_the_log_is_history_not_now(tmp_path,
+                                                            _no_kill, capsys):
+    """**這一關擋的是「已經好了的舊事故」。**
+
+    卡住時引擎每分鐘印一次，所以 UNRESOLVED 出現在 log 尾端 = 現在還在卡。
+    只出現在更前面 = 它已經恢復了，那是歷史 —— 拿歷史去重啟一個正在
+    好好報價的引擎，比不重啟還糟。
+    """
+    tmp = str(tmp_path)
+    _mk(tmp, "MON", ok=True, reason="live, quoting", net=0.2, tol=2.0)
+    _log(tmp, "MON", attempts=814, tail_pad=60)   # 之後又正常跑了 60 行
+    _call(tmp, "MON", [])
+    assert not _no_kill, "拿舊事故重啟了一個健康的引擎"
+
+
+def test_deadlock_with_exposure_still_open_is_not_touched(tmp_path,
+                                                          _no_kill, capsys):
+    """死鎖 + 裸曝險還在 -> 不碰。重啟會讓一個部位對不上的引擎重新交易。"""
+    tmp = str(tmp_path)
+    _mk(tmp, "MON", ok=True, reason="live, quoting", net=638.2, tol=2.0)
+    _log(tmp, "MON", attempts=814)
+    _call(tmp, "MON", [])
+    assert "裸曝險還在" in capsys.readouterr().out
+    assert not _no_kill
+
+
+def test_budget_is_shared_between_both_kinds(tmp_path, _no_kill, capsys):
+    """預算**共用**：兩種狀態加起來不得超過上限。
+    分開算的話，一個每五分鐘換一種症狀的引擎會被無限重啟。"""
+    tmp = str(tmp_path)
+    _mk(tmp, "MON", ok=True, reason="live, quoting", net=0.2, tol=2.0)
+    _log(tmp, "MON", attempts=814)
+    now = time.time()
+    hr._save("MON", {"restarts": [now - 60, now - 30]})   # HALT 那邊用掉的
+    _call(tmp, "MON", [])
+    assert "預算用完" in capsys.readouterr().out
+    assert not _no_kill
+
+
 def test_tolerance_comes_from_config_not_a_constant(tmp_path, _no_kill,
                                                     capsys):
     """容忍值要從設定讀。寫死就是第二份實作，會安靜地跟引擎不一致。"""
@@ -151,5 +227,5 @@ def test_tolerance_comes_from_config_not_a_constant(tmp_path, _no_kill,
 
     _mk(tmp, "MON", ok=False, reason=R_NET, net=1.5, tol=2.0)
     _call(tmp, "MON", [])
-    assert "HALT 自動恢復" in capsys.readouterr().out
+    assert "自動恢復[HALT/裸曝險]" in capsys.readouterr().out
     assert _no_kill
