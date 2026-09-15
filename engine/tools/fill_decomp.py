@@ -18,8 +18,17 @@
     逆選擇       = 買:(未來 mid - 成交價)  賣:(成交價 - 未來 mid)，除 mid
     淨           = 兩者相加（= 他圖上的 "markout + half-spread"）
 
-**未來 mid 來自錄製器的逐秒頂檔**（`D:/flowbot_data/lighter/tob`），
+**兩端的 mid 都來自錄製器的逐檔頂檔**（`D:/flowbot_data/lighter/tob`），
 不是引擎自己的簿口 —— 兩條獨立管線,不然這就是拿自己驗自己。
+
+> **2026-09-15 修正，第一版是錯的。** 第一版的成交當下 mid 取 CSV 的
+> `mid_at_fill`,而那個欄位記的是**對沖腿（HL）**的中價（engine.py:1480
+> `taker_v.book.mid()`）。拿它配 Lighter 的未來 mid,量到的是
+> 「逆選擇 ＋ **兩所基差**」。實測基差把半價差灌水 **+4.69 bps**、
+> 把逆選擇同額往下壓。
+> 這正是 mistake.md 2026-09-14 記過的形狀（引擎為此另外記了
+> `maker_mid_at_fill`）—— 那條教訓修了引擎,沒有修到隔天才寫的這支工具。
+> 舊讀數仍然印在下面當對照,它被引用過,不可以悄悄消失。
 
 **基準是 mid 不是成交價**（mistake.md 2026-09-14）:我們成交在自己的報價上,
 而那個價格已經含了半個價差。用成交價當基準,價差越寬越會誤判通過。
@@ -40,30 +49,12 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.dirname(HERE)
 sys.path.insert(0, os.path.dirname(ENGINE))
+sys.path.insert(0, HERE)
 from arblib.maker_log import maker_log_paths            # noqa: E402
-
-TOB = "D:/flowbot_data/lighter/tob"
-FRESH_SEC = 30.0        # 對到的頂檔比這舊就不算（薄市場更新本來就慢）
-
-
-def load_tob(coin, t0, t1):
-    hours, t = set(), t0 - 3600.0
-    while t <= t1 + 7200.0:
-        dt = datetime.fromtimestamp(t, timezone.utc)
-        hours.add((dt.strftime("%Y%m%d"), dt.strftime("%H")))
-        t += 1800.0
-    fr = []
-    for day, hh in sorted(hours):
-        for f in glob.glob("%s/%s/%s.parquet" % (TOB, day, hh)):
-            x = pd.read_parquet(f, columns=["rx_ms", "coin", "bid", "ask"])
-            fr.append(x[x["coin"] == coin])
-    if not fr:
-        sys.exit("成交帶目錄裡沒有涵蓋這段時間的頂檔")
-    d = pd.concat(fr, ignore_index=True)
-    d["t"] = d["rx_ms"].astype("int64") / 1e3
-    d = d[(d["ask"] > d["bid"]) & (d["bid"] > 0)].sort_values("t")
-    d["mid"] = (d["bid"] + d["ask"]) / 2.0
-    return d.reset_index(drop=True)
+# **同一份頂檔載入與對齊,不要第二份實作。** 兩支工具對同一件事給出不同
+# 答案的時候,先查它們跑在什麼之上（mistake.md 2026-09-11）—— 而最省事的
+# 做法是讓它們不可能不同。
+from markout_curve import FRESH_SEC, asof, load_tob     # noqa: E402
 
 
 def main() -> int:
@@ -88,15 +79,15 @@ def main() -> int:
     f = f[f["t_fill"].notna()]
 
     tob = load_tob(coin, float(f["t_fill"].min()), float(f["t_fill"].max()))
-    tgt = f["t_fill"].values + a.horizon
-    i = tob["t"].searchsorted(tgt, side="right") - 1
-    ok = i >= 0
-    f = f[ok].copy()
-    i = i[ok]
-    f["fut_mid"] = tob["mid"].values[i]
-    f["fut_age"] = (f["t_fill"].values + a.horizon) - tob["t"].values[i]
+    # **兩端都取自這一本簿口。** 成交當下的 mid 不可以用 CSV 的
+    # `mid_at_fill` —— 那是對沖腿的（見檔頭的更正）。
+    base, base_age = asof(tob, f["t_fill"].values)
+    fut, fut_age = asof(tob, f["t_fill"].values + a.horizon)
+    f["maker_mid"], f["fut_mid"] = base, fut
+    f["fut_age"], f["base_age"] = fut_age, base_age
+    f = f[f["maker_mid"].notna() & (f["base_age"] <= FRESH_SEC)].copy()
 
-    m0 = f["mid_at_fill"].astype(float)
+    m0 = f["maker_mid"].astype(float)
     px = f["px"].astype(float)
     is_buy = f["side"].values == "BUY"
     # 賺到的半價差：買在 mid 之下、賣在 mid 之上，兩種都是正的收入
@@ -127,32 +118,50 @@ def main() -> int:
     print("  %-16s %+9.2f" % ("逆選擇", -1.07))
     print("  %-16s %+9.2f" % ("**淨**", 0.19))
     print()
-    h, adv = good["half"].median(), good["adv"].median()
+    h, adv = good["half"].mean(), good["adv"].mean()
     print("  我們的半價差是他的 **%.1f 倍**，逆選擇是他的 **%.1f 倍**"
           % (h / 1.25, abs(adv) / 1.07))
-    print("  -> %s" % ("**收入端贏他，但被逆選擇吃掉更多**"
-                       if h > 1.25 and abs(adv) > 1.07 else
-                       "形狀跟他不同，先查這支"))
+    # **留下來的佔比才是結構**,倍數本身只說這個市場比較寬。
+    print("  留下來的佔比：我們 %.0f%%（%.2f / %.2f）  他 %.0f%%（0.19 / 1.25）"
+          % ((1 - abs(adv) / h) * 100 if h else 0, h - abs(adv), h, 15.2))
+
+    print()
+    print("=== 對照：舊讀數（`mid_at_fill` = **對沖腿 HL** 的中價）===")
+    om = pd.to_numeric(good["mid_at_fill"], errors="coerce")
+    opx, obuy = good["px"].astype(float), good["side"].values == "BUY"
+    ohalf = ((om - opx) * obuy + (opx - om) * (~obuy)) / om * 1e4
+    print("  賺到的半價差 平均 %+.2f（含兩所基差）vs 修正後 %+.2f  差 %+.2f bps"
+          % (ohalf.mean(), h, ohalf.mean() - h))
 
     print()
     print("=== 自曝檢查 ===")
     bad = []
     c = "PASS" if (good["half"] > 0).mean() > 0.8 else "**FAIL**"
     if c.startswith("*"):
-        bad.append(c)
-    print("  C1 賺到的半價差幾乎都該是正的（我們掛在 mid 外側）%s  %.0f%%"
+        bad.append("C1")
+    print("  C1 賺到的半價差幾乎都該是正的（我們掛在 mid 外側）  %s  %.0f%%"
           % (c, (good["half"] > 0).mean() * 100))
     age = good["fut_age"]
     c = "PASS" if age.median() <= FRESH_SEC else "**FAIL**"
     if c.startswith("*"):
-        bad.append(c)
-    print("  C2 未來頂檔要夠新                                 %s  中位 %.1fs"
+        bad.append("C2")
+    print("  C2 未來頂檔要夠新                                  %s  中位 %.1fs"
           % (c, age.median()))
+    # C3 **新增,而且它就是第一版死掉的那一關**:post-only 掛在觸價或更裡面,
+    # 所以賺到的半價差不可能超過這個市場自己的半價差。第一版（拿 HL 的
+    # 中價當基準）在這一關會紅 —— 13.21 > 12.81。
+    hs = ((tob["ask"] - tob["bid"]) / (tob["ask"] + tob["bid"]) * 1e4).median()
+    c = "PASS" if h <= hs + 1.0 else "**FAIL**"
+    if c.startswith("*"):
+        bad.append("C3")
+    print("  C3 賺到的半價差不可超過市場自己的半價差            %s  %+.2f vs %.2f"
+          % (c, h, hs))
     drop = len(f) - len(good)
-    print("  C3 因頂檔太舊丟掉 %d / %d 筆（丟太多就是這個市場"
+    print("  C4 因頂檔太舊丟掉 %d / %d 筆（丟太多就是這個市場"
           "報價太稀疏，數字要打折）" % (drop, len(f)))
     print()
-    print("  %s" % ("全過" if not bad else "**沒過，數字不可引用**"))
+    print("  %s" % ("全過" if not bad
+                    else "**沒過（%s），數字不可引用**" % ",".join(bad)))
     return 1 if bad else 0
 
 

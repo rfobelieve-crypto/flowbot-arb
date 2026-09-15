@@ -71,7 +71,23 @@ MAKER_CSV_HEADER = ["ts", "direction", "maker_venue", "hedge_venue", "side",
                     #     的頂檔年齡中位 2.64 秒,而 edge decayed / behind the
                     #     touch 只有 0.21 / 0.13）—— 於是「只取新鮮的那些重建」
                     #     會系統性地篩掉要量的那一群,而且是往「有在動」偏。
-                    "behind_at_cancel_bps", "edge_at_cancel_bps"]
+                    "behind_at_cancel_bps", "edge_at_cancel_bps",
+                    # 2026-09-15 加的兩欄，各修一個已經咬過的問題。
+                    #
+                    # `maker_mid_at_fill` —— 上面那個 `mid_at_fill` 記的是
+                    # **對沖腿**的中價（engine.py `taker_v.book.mid()`）。
+                    # 逐筆分解要的是**掛單腿**的,拿錯就是把兩所基差混進
+                    # 逆選擇裡:MON 實測基差把半價差灌水 **+5.67 bps**、
+                    # 把逆選擇同額往下壓（淨值剛好不變,所以它不會自己現形）。
+                    # 這個量引擎本來就算了,只是沒有寫進 CSV,於是分析端只好
+                    # 從外部錄製器重建 —— 而重建的第一版就拿錯了欄位。
+                    #
+                    # `behind_at_fill_bps` —— 成交**那一刻**我們離觸價多遠。
+                    # 它回答的是「我們是被資訊挑走,還是因為報價過時被順手
+                    # 撿走」,而那兩個的修法完全不同（前者要換市場,後者要改
+                    # `maker_reprice_bps`）。撤單那一刻的同一個量已經在記了,
+                    # 成交那一刻的沒有 —— 而成交才是要花錢的那一邊。
+                    "maker_mid_at_fill", "behind_at_fill_bps"]
 # Shadow mode (2026-09-04). NOT a paper mode: the README's "there is no paper
 # mode -- validate with recorded data and tiny position caps, not with
 # simulated fills" still stands, and nothing here simulates a fill, a position
@@ -1484,6 +1500,12 @@ class Engine:
             # 直接拿 taker 的去算，那會把兩所的基差混進逆選擇裡。
             if order.stats.get("maker_mid_at_fill") is None:
                 order.stats["maker_mid_at_fill"] = maker_v.book.mid()
+            # 成交**那一刻**離觸價多遠。撤單那一刻的同一個量早就在記了,
+            # 而成交才是要花錢的那一邊（2026-09-15）。用的是跟重掛規則
+            # 同一顆 `_maker_behind_bps`,所以它跟決策不可能不一致。
+            if order.stats.get("behind_at_fill") is None:
+                order.stats["behind_at_fill"] = self._maker_behind_bps(
+                    maker_v, order)
             log.warning("[QUOTE FILL] %s %s %.6g of %.6g @%.6g (%s) — hedging",
                         maker_v.name, "BUY" if order.is_buy else "SELL",
                         order.filled_base, order.qty, px, order.status or "-")
@@ -1790,6 +1812,11 @@ class Engine:
             if st.get("behind_at_cancel") is not None else "",
             f"{st['edge_at_cancel']:.2f}"
             if st.get("edge_at_cancel") is not None else "",
+            # 2026-09-15 新增的兩欄,理由見 MAKER_CSV_HEADER 那裡。
+            f"{st['maker_mid_at_fill']:.8g}"
+            if st.get("maker_mid_at_fill") else "",
+            f"{st['behind_at_fill']:.2f}"
+            if st.get("behind_at_fill") is not None else "",
         ])
 
     async def _cancel_stale_orders(self) -> None:
