@@ -481,6 +481,15 @@ def main(argv=None) -> int:
     # 那段時間看起來像看護死了。
     if not a.pair:
         rc |= _watch_account(pairs, a, last)
+        # **離開清單的標的，指紋要一起清掉（2026-09-15 稽核）。**
+        # `_emit` 只在指紋改變時送。MON 15:34 HALT 的指紋留在檔裡,而 MON
+        # 被 stop 之後沒人更新它 —— 重啟後若又以一字不差的理由 HALT,
+        # 那則告警會被判成「狀態沒變」吞掉。AERO/XPL 的舊指紋也是同一件事。
+        # 只在全量輪（沒有 --pair）清：單標的模式看不到全貌，不可以替別人刪。
+        keep = set(pairs)
+        for k in [k for k in last
+                  if not k.startswith("_") and k.split(":")[0] not in keep]:
+            del last[k]
     last["_asof"] = time.time()
 
     # 乾跑預設**不動狀態**（預覽就該沒有副作用）—— 這一條原本寫在

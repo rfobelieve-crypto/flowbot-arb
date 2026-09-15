@@ -157,3 +157,64 @@ def test_no_two_launchers_share_a_signature():
     assert sigs, "一個簽章都沒解析到 —— 正則或 glob 壞了，這支等於不存在"
     dup = {k: sorted(set(v)) for k, v in sigs.items() if len(set(v)) > 1}
     assert not dup, "同一個簽章有多支啟動器（會變成兩個引擎）：%s" % dup
+
+
+# ------------------------------------------------------------- STOP 閘門
+#
+# 2026-09-15：MON flat 之後放了 `logs/stop/run_hmm_MON.stop`，而稽核發現
+# `run_hmm_MON.bat` **根本不讀它** —— 看門狗讀、.bat 迴圈不讀。python 一結束,
+# 迴圈 30 秒後就用新程式碼把一個會送真單的引擎拉起來（而且當時有**兩個**
+# 包裝層在跑）。原因：09-14 的 STOP 閘門（af4a19e）是手動 patch 進既有啟動器,
+# **產生器模板沒改**，而 MON 是那之後才產的。「開關存在但沒武裝」的又一次。
+#
+# 那一支當下還在跑，不能改（cmd 照位元組位置逐行讀 .bat，執行中改內容會跑到
+# 半行指令），所以列為已知例外 —— 例外本身也被斷言：修好了卻不把它移出清單,
+# 這一關會紅，逼人把例外拿掉。
+
+GATE = re.compile(r"^\s*if\s+exist\s+logs\\stop\\%~n0\.stop\s+goto\s+end\s*$",
+                  re.I | re.M)
+KNOWN_UNGATED = {
+    # 使用者 2026-09-15「先不要重啟」；結束兩個 cmd 包裝層被權限擋下，
+    # 等使用者處理後再修這支並從這裡拿掉。
+    "run_hmm_MON.bat",
+}
+
+
+def _gate_before_python(body: str) -> bool:
+    lines = [ln.strip() for ln in body.splitlines()
+             if ln.strip() and not ln.strip().lower().startswith("rem")]
+    try:
+        loop = next(i for i, s in enumerate(lines) if s.lower() == ":loop")
+        py = next(i for i, s in enumerate(lines) if "main.py" in s)
+    except StopIteration:
+        return False
+    return any(GATE.match(s) for s in lines[loop + 1:py])
+
+
+def test_generator_template_has_the_stop_gate():
+    """產生器產出的每一支都要有 —— 修這裡才修得到以後的每一支。"""
+    import sys
+    sys.path.insert(0, os.path.normpath(os.path.join(ROOT, "..")))
+    from arblib.make_hmm_config import BAT
+    body = BAT.format(sym="XYZ", hsym="XYZ", date="2026-09-15", bs="\\",
+                      eng="C:\\x")
+    assert _gate_before_python(body), \
+        "make_hmm_config.BAT 沒有在 python 之前檢查 stop 檔"
+    assert ":end" in body, "閘門 goto end，但模板沒有 :end 標籤"
+
+
+def test_every_live_launcher_has_the_stop_gate():
+    live = []
+    for p in glob.glob(os.path.join(ROOT, "run_*.bat")):
+        body = io.open(p, "rb").read().decode("ascii", "replace")
+        cmd = [ln for ln in body.splitlines()
+               if "main.py" in ln and not ln.strip().lower().startswith("rem")]
+        if cmd and "--record-only" not in cmd[0]:
+            live.append((os.path.basename(p), body))
+    assert live, "一支 live 啟動器都沒找到 —— glob 壞了"
+    missing = sorted(n for n, b in live if not _gate_before_python(b))
+    assert set(missing) <= KNOWN_UNGATED, \
+        "live 啟動器沒有 stop 閘門（stop 檔攔不住 .bat 迴圈）：%s" % \
+        sorted(set(missing) - KNOWN_UNGATED)
+    fixed = KNOWN_UNGATED - set(missing)
+    assert not fixed, "這些已經有閘門了，請從 KNOWN_UNGATED 拿掉：%s" % sorted(fixed)

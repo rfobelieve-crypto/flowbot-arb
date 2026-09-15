@@ -38,7 +38,7 @@ API 查到的價格與步長算出來，而算式與當時的數字一起寫進�
     min_order       max(場館下限, $10)
 
 不從量測來的、刻意在候選之間**保持一致**的：
-    thresholds ±15 bps    G2 直接受它影響，換一個門檻就換一個答案 ——
+    thresholds ±3 bps（BAND_BPS；09-14 之前是 ±15）   G2 直接受它影響，換一個門檻就換一個答案 ——
                           要比較候選，這個必須一樣。
     max_position_usd 60   每腿；max_account_gross_usd 70 = 單一市場紀律
     max_order_notional 15 M2/M3 沒量之前不放大（對沖腿實測吃得下 30-40 倍）
@@ -280,18 +280,25 @@ REM are STRUCTURALLY unmeasurable there. A ten-hour clean shadow run told
 REM us nothing about whether live would even start (it would not: the HL
 REM SDK was not installed).
 REM
-REM STOP ORDER MATTERS:
-REM   1. echo flat > logs{bs}{sym}{bs}control.cmd   (while the engine is alive)
-REM   2. comment this member out of ops{bs}arb_watchdog.ps1
-REM   3. only then kill the processes
-REM   4. wait past one watchdog cycle (>5 min) and re-check -- an
-REM      immediately-empty process list is NOT evidence
+REM HOW TO STOP IT (one action, not a remembered sequence):
+REM   1. echo flat > logs{bs}{sym}{bs}control.cmd   (while the engine is alive - it needs the signer)
+REM   2. type nul > logs{bs}stop{bs}%~n0.stop
+REM      Both restarters read that file: this loop exits at the gate
+REM      below, and arb_watchdog.ps1 will not relaunch. Delete it to
+REM      resume. Killing python alone does NOT stop anything - the cmd
+REM      wrapper relaunches it 30s later.
+REM   2026-09-15: this template had NO gate until then. The STOP gate was
+REM   hand-patched into the existing launchers on 09-14 (af4a19e) and the
+REM   template was missed, so run_hmm_MON.bat (generated 20:19 that day)
+REM   ignored its .stop file. tests/test_watchdog_registry.py now pins it.
 REM Comments ASCII ONLY - UTF-8 bytes make cmd.exe skip lines.
 cd /d {eng}
 :loop
+if exist logs{bs}stop{bs}%~n0.stop goto end
 python main.py --symbol {hsym} --hedge lighter --config config_{sym}.yaml --no-dashboard >> logs{bs}{sym}{bs}runner.log 2>&1
 timeout /t 30 /nobreak >nul
 goto loop
+:end
 """
 
 
