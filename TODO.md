@@ -92,6 +92,9 @@ markout 從沒量過**（目前只到 120 秒，5–120 秒是平的）。§1.29
 |---|---|---|
 | 同側成交筆數用「最後 30 個檔案」而不是時間窗 —— 與 `why_missed` 的絕對筆數對不上 | `engine/tools/missed_fills.py:77` `fs[-30:]` | **已證**仍在；兩支的絕對筆數不可引用（commit 4b487de） |
 | `behind_at_fill_bps` 讀到 −26/−26/−35：成交當下我們那一檔可能已被簿口頻道移除，量到的是**下一檔**的距離 | `engine.py` `_consume_maker_fill` | **推論**（兩條 WS 沒有時間戳對照）；在對照之前這一欄不可解讀 |
+| **帳戶串流沒有心跳年齡警報**：Lighter `AccountOrdersFeed` 只在例外時清 `ready`；「連著但沒訊框」看起來是健康的。V7（flow_system `indicator/okx/ws_private.py`）每週期檢查私有 WS 心跳年齡（>30 秒 HALT、>300 秒降級） | `engine/entropy_arb/venue_lighter.py` | 未修。**等 MON 帶 B3b 修正跑過第一天再動**（不同時上兩個沒實盤過的改動） |
+| **斷線重連後不補漏掉的訂單事件**：重訂閱只拿到仍開著的單，斷線期間走到終態的單在 `_latest` 裡永遠停在舊狀態 —— 09-15 00:10 撤單確認死鎖 72 分鐘就是它，現在靠 `halt_recover` 重啟收拾。V7 也沒做（它靠每週期 REST 對帳部位） | 同上 | 未修，同上；候選做法：重訂閱後對仍在追的 coi 查 REST inactive orders |
+| `flatten_residual.py` 沒起帳戶串流 -> 送單只回 `sent-unconfirmed` | `engine/tools/flatten_residual.py` | **已修**（先起串流、沒 ready 不送；引擎在跑且沒 HALT 則拒絕）＋`tests/test_flatten_residual.py` |
 | HMM 產生器的 `.bat` 模板沒有 STOP 閘門 | `arblib/make_hmm_config.py` | **已修**（模板＋`test_watchdog_registry.py`）；`run_hmm_MON.bat` 本身還在跑，未修，見測試裡的 `KNOWN_UNGATED` |
 
 ---
