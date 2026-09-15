@@ -173,11 +173,11 @@ def test_no_two_launchers_share_a_signature():
 
 GATE = re.compile(r"^\s*if\s+exist\s+logs\\stop\\%~n0\.stop\s+goto\s+end\s*$",
                   re.I | re.M)
-KNOWN_UNGATED = {
-    # 使用者 2026-09-15「先不要重啟」；結束兩個 cmd 包裝層被權限擋下，
-    # 等使用者處理後再修這支並從這裡拿掉。
-    "run_hmm_MON.bat",
-}
+# 2026-09-15：run_hmm_MON.bat 曾經在這裡。使用者 18:2x 結束兩個 cmd 包裝層
+# 之後補上閘門並移出。**這個集合應該保持空的**；要加東西進來，理由必須是
+# 「那支 .bat 正在被 cmd 執行、不能改」，而且要附上何時移出。
+# （`{}` 是 dict 不是 set —— 第一次寫成 `{ # 註解 }` 就在這裡 TypeError。）
+KNOWN_UNGATED: set = set()
 
 
 def _gate_before_python(body: str) -> bool:
