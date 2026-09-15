@@ -6,6 +6,17 @@
 >
 > **新 session 的閱讀順序**：本檔 → `docs/NEXT_SESSION.md`（現況與待辦）→
 > 手上那件事對應的 `docs/` 檔。
+>
+> **HMM（對沖做市）2026-09-15 起整條住在這裡**（使用者：「把HMM相關的東西都移過去」，
+> HMM 從本 repo 開 session）。做 HMM 的事先讀：`docs/HMM.md`（第 9 次 override 全文、
+> 命名、shadow 退場、寫死的紀律）→ `TODO.md` 最上面的 HMM 各節（§1.41d 09-16 結算）→
+> `docs/HMM_MISTAKES.md`（09-13~09-15 踩過的坑）。
+> 本節的 `docs/NEXT_SESSION.md` 與 §7 停在 09-04，**比 HMM 舊**，HMM 的現況以上面三份為準。
+>
+> **告警分工（2026-09-15 使用者：「flowsystem 報 v7，arb 報 HMM」）**：同一個 Discord 頻道、
+> 同一個 webhook，但 **HMM 的一切告警只從 arb 送**（`ops/hmm_watch.py`：各標的狀態＋帳戶層 B6）。
+> flow_system 的看板不再報 HMM 引擎、HMM 錄製、帳戶額度，只從外面看「arb 的看護有沒有在跑、
+> 送不送得出去」。要加 HMM 的新告警，加在 `ops/hmm_watch.py`，不要加回 flow_system。
 
 ---
 
@@ -104,6 +115,12 @@
 | 部署架構（AWS 引擎 / Vercel 儀表板） | `docs/DEPLOY.md` |
 | 成本名冊（七桶） | `docs/COST_INVENTORY.md` |
 | 憑證檢查（不印密鑰） | `engine/tools/check_env.py --root` |
+| **HMM 決策紀錄與規則** | `docs/HMM.md`（2026-09-15 從 flow_system 搬入） |
+| **HMM 踩坑紀錄** | `docs/HMM_MISTAKES.md` |
+| HMM 設定產生／篩選 | `arblib/make_hmm_config.py`、`arblib/hmm_screen.py`、`arblib/hmm_universe.py` |
+| HMM 分析工具 | `engine/tools/fill_decomp.py`、`markout_curve.py`、`account_budget.py`、`funding_status.py` |
+| **HMM 看護（Discord）** | `ops/hmm_watch.py` ＋ `ops/live_hmm.py` ＋ `ops/alert.py`；排程 `Arb_HmmWatch`（`ops/register_hmm_watch.ps1`），產物 `results/hmm_watch.log`、`results/hmm_alert_last.json`。憑證 `ARB_DISCORD_WEBHOOK_URL` 放 `arb/.env` |
+| 停一個標的 | 建 `engine/logs/stop/<啟動器檔名>.stop`（.bat 迴圈、看門狗、看護三個讀者都認它） |
 
 ## 7. 現在還開著的（2026-09-04 晚）
 

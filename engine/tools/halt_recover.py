@@ -55,8 +55,10 @@
 ===========================================================================
 這支住在 arb，因為**重啟的權限屬於 arb**（CLAUDE.md §第 4 線的隔離：
 flow_system 讀它，它不讀 flow_system）。它不送 Discord —— 它寫一份
-`logs/<pair>/halt_recover.json`，由 flow_system 的 `hmm_watch.py` 讀去報。
-寫的人在 arb、讀的人在 flow_system，方向沒有反。
+`logs/<pair>/halt_recover.json`，由 `ops/hmm_watch.py` 讀去報。
+（2026-09-15 之前看護住在 flow_system；HMM 整條搬進 arb 之後兩者同在這裡，
+告警走 arb 自己的 `ops/alert.py`。這支仍然不送：「動手」與「回報」分成
+兩個行程，一個卡住不會拖死另一個。）
 
 用法（由 arb_watchdog.ps1 每 5 分鐘呼叫）：
     python tools/halt_recover.py --pair MON
@@ -265,8 +267,8 @@ def main() -> int:
                      "reason": reason[:200], "net": net,
                      "tol": tol, "pids": pids, "msg": msg}
     _save(pair, state)
-    # **不在這裡送 Discord** —— 告警管線住在 flow_system，而 arb 不讀它。
-    # hmm_watch.py 讀這份 json 去報（寫在 arb、讀在 flow_system，方向沒反）。
+    # **不在這裡送 Discord** —— ops/hmm_watch.py 讀這份 json 去報
+    # （2026-09-15 起兩者同在 arb，告警走 ops/alert.py）。
     print(msg)
     print("已殺 pid %s —— .bat 的 :loop 會在 30 秒內拉回來（strict 重讀部位）"
           % pids)

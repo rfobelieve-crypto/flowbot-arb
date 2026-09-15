@@ -25,3 +25,7 @@ entropy-arb-main/
 perp-dex-tools-main/
 results/.record_universe.lock
 engine/logs/universe/
+
+# HMM watcher runtime state (rewritten every 5 min by Arb_HmmWatch)
+results/hmm_watch_last.json
+results/hmm_alert_last.json

@@ -270,9 +270,9 @@ Write-Output $budline
 # 簿口過期、波動熔斷）一律要人 —— 判準與理由寫在 halt_recover.py 檔頭，
 # 每一道關卡都有一個「證明它擋得住」的測試（tests/test_halt_recover.py）。
 #
-# 為什麼放這裡而不是 flow_system 的看護：**重啟的權限屬於 arb**
-# （CLAUDE.md §第 4 線的隔離是單向的）。它不送 Discord，只寫
-# logs/<pair>/halt_recover.json，由 hmm_watch.py 讀去報。
+# 為什麼放看門狗而不是看護裡：**動手與回報分成兩個行程**。它不送 Discord，只寫
+# logs/<pair>/halt_recover.json，由 ops/hmm_watch.py 讀去報
+# （2026-09-15 起看護也在 arb，排程 Arb_HmmWatch）。
 #
 # 只對 run_hmm_* 且沒有 STOP 旗標的跑 —— record-only 不會 HALT。
 foreach ($m in $Members.GetEnumerator()) {
