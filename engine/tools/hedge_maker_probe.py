@@ -146,9 +146,20 @@ async def main(args) -> int:
                 assert v.ready_to_trade(), "帳戶串流沒 ready，中止"
                 eq = await v.fetch_equity()
                 pos = await v.fetch_position()
-                print("G2 抵押 total=%.2f available=%.2f" % (eq[0], eq[1]))
+                # `fetch_equity` 走 portfolio 端點時回 (權益, **None**),
+                # 只有 clearinghouse 那條 fallback 才有可用餘額。
+                # None 是「沒量到」不是 0 —— 印成 0 會讀成「沒錢」
+                # （mistake.md 2026-09-13:金額的未知狀態不可以長得像 0）。
+                assert eq, "G2 破:讀不到抵押"
+                total, free = eq[0], eq[1]
+                print("G2 抵押 total=%.2f  available=%s"
+                      % (total, "**未量**" if free is None else "%.2f" % free))
                 print("G3 本市場既存部位 = %.8g" % pos)
-                assert eq and eq[1] >= 2.0, "G2 破:可用餘額不足"
+                need = MAX_NOTIONAL_USD / 5.0     # HL SOL 最高 5x
+                assert total >= need, "G2 破:權益 %.2f < 需要的保證金 %.2f" \
+                    % (total, need)
+                if free is not None:
+                    assert free >= need, "G2 破:可用餘額不足"
                 assert abs(pos) < 1e-12, "G3 破:這個市場已有部位，不動它"
 
             is_buy = args.side == "buy"
